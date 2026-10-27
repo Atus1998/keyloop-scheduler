@@ -1,5 +1,10 @@
 package com.keyloop.scheduler.adapter.out.persistence;
 
-import org.springframework.data.jpa.repository.JpaRepository;
+import java.util.Optional;
+import org.springframework.data.repository.Repository;
 
-interface VehicleJpaRepository extends JpaRepository<VehicleEntity, Long> {}
+/** Read only: reference data comes from the seed. */
+interface VehicleJpaRepository extends Repository<VehicleEntity, Long> {
+
+  Optional<VehicleEntity> findById(long id);
+}

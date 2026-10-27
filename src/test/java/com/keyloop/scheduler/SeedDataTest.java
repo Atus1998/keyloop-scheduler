@@ -6,11 +6,14 @@ import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
 import com.keyloop.scheduler.domain.Dealership;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
 /** Uses the app's own Flyway locations, so the seed is loaded. */
 @Import(TestcontainersConfiguration.class)
@@ -19,6 +22,7 @@ class SeedDataTest {
 
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ReferenceDataPort referenceData;
+  @Autowired private DataSource dataSource;
 
   @Test
   void loadsSeedCounts() {
@@ -83,6 +87,15 @@ class SeedDataTest {
       jdbc.update("DELETE FROM customer WHERE id = ?", customerId);
       jdbc.update("DELETE FROM service_type WHERE id = ?", serviceTypeId);
     }
+  }
+
+  @Test
+  void seedCanRunTwice() {
+    var seed = new ResourceDatabasePopulator(new ClassPathResource("db/seed/R__seed.sql"));
+
+    seed.execute(dataSource);
+
+    loadsSeedCounts();
   }
 
   private int count(String table) {

@@ -103,6 +103,29 @@ class SchemaConstraintsTest {
         "vehicle_registration_unique");
   }
 
+  @Test
+  void rejectsAppointmentWithTechnicianFromOtherDealership() {
+    var row = new AppointmentRow();
+    long otherTechnician =
+        fixtures.insertTechnician(fixtures.insertDealership(), "Other dealership");
+
+    assertRejected(
+        () -> row.insert("technician_id", String.valueOf(otherTechnician)),
+        FOREIGN_KEY_VIOLATION,
+        "appointment_technician_dealership_fkey");
+  }
+
+  @Test
+  void rejectsAppointmentWithBayFromOtherDealership() {
+    var row = new AppointmentRow();
+    long otherBay = fixtures.insertBay(fixtures.insertDealership());
+
+    assertRejected(
+        () -> row.insert("bay_id", String.valueOf(otherBay)),
+        FOREIGN_KEY_VIOLATION,
+        "appointment_bay_dealership_fkey");
+  }
+
   private static void assertRejected(ThrowingCallable insert, String sqlState, String detail) {
     Throwable thrown = catchThrowable(insert);
 

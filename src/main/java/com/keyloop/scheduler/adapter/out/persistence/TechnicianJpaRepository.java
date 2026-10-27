@@ -1,11 +1,12 @@
 package com.keyloop.scheduler.adapter.out.persistence;
 
 import java.util.List;
-import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
-interface TechnicianJpaRepository extends JpaRepository<TechnicianEntity, Long> {
+/** Read only: reference data comes from the seed. */
+interface TechnicianJpaRepository extends Repository<TechnicianEntity, Long> {
 
   @Query(
       value =

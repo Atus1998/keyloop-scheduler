@@ -12,6 +12,7 @@ import com.keyloop.scheduler.application.service.ResourceConflictException;
 import com.keyloop.scheduler.domain.Appointment;
 import com.keyloop.scheduler.domain.AppointmentStatus;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -147,6 +148,28 @@ class AppointmentAdapterTest {
             String.class,
             stored.id());
     assertThat(startUtc).isEqualTo("2026-11-03 02:00");
+  }
+
+  @Test
+  void returnsTheInstantsThatWereStored() {
+    Appointment stored =
+        appointments.insert(
+            appointment(
+                technician1,
+                bay1,
+                vehicle1,
+                Instant.parse("2026-11-03T10:00:00.123456789Z"),
+                Instant.parse("2026-11-03T11:00:00.123456789Z"),
+                CONFIRMED));
+
+    OffsetDateTime startInDb =
+        jdbc.queryForObject(
+            "SELECT start_at FROM appointment WHERE id = ?", OffsetDateTime.class, stored.id());
+    OffsetDateTime endInDb =
+        jdbc.queryForObject(
+            "SELECT end_at FROM appointment WHERE id = ?", OffsetDateTime.class, stored.id());
+    assertThat(stored.startAt()).isEqualTo(startInDb.toInstant());
+    assertThat(stored.endAt()).isEqualTo(endInDb.toInstant());
   }
 
   private void assertExclusion(Appointment loser, String constraint) {

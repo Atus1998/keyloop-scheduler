@@ -1,6 +1,7 @@
 package com.keyloop.scheduler.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.keyloop.scheduler.PostgresIntegrationTest;
 import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
@@ -86,6 +87,16 @@ class ReferenceDataAdapterTest {
 
     assertThat(referenceData.findServiceType(id))
         .contains(new ServiceType(id, "Brake service", Duration.ofMinutes(90)));
+  }
+
+  @Test
+  void failsClearlyOnInvalidZoneId() {
+    long id = fixtures.insertDealership("Mars/Olympus_Mons", "09:00", "18:00");
+
+    assertThatThrownBy(() -> referenceData.findDealership(id))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Dealership " + id)
+        .hasMessageContaining("Mars/Olympus_Mons");
   }
 
   @Test

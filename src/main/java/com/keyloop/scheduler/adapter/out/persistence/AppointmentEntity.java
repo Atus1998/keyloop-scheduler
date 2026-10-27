@@ -4,11 +4,14 @@ import com.keyloop.scheduler.domain.Appointment;
 import com.keyloop.scheduler.domain.AppointmentStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 @Entity
 @Table(name = "appointment")
@@ -39,8 +42,9 @@ class AppointmentEntity {
   @Column(name = "end_at", nullable = false)
   private Instant endAt;
 
+  @Enumerated(EnumType.STRING)
   @Column(nullable = false)
-  private String status;
+  private AppointmentStatus status;
 
   protected AppointmentEntity() {}
 
@@ -52,22 +56,15 @@ class AppointmentEntity {
     entity.serviceTypeId = appointment.serviceTypeId();
     entity.technicianId = appointment.technicianId();
     entity.bayId = appointment.bayId();
-    entity.startAt = appointment.startAt();
-    entity.endAt = appointment.endAt();
-    entity.status = appointment.status().name();
+    // PostgreSQL keeps microseconds. Truncate here so the returned appointment matches the row.
+    entity.startAt = appointment.startAt().truncatedTo(ChronoUnit.MICROS);
+    entity.endAt = appointment.endAt().truncatedTo(ChronoUnit.MICROS);
+    entity.status = appointment.status();
     return entity;
   }
 
   Appointment toDomain() {
     return new Appointment(
-        id,
-        dealershipId,
-        vehicleId,
-        serviceTypeId,
-        technicianId,
-        bayId,
-        startAt,
-        endAt,
-        AppointmentStatus.valueOf(status));
+        id, dealershipId, vehicleId, serviceTypeId, technicianId, bayId, startAt, endAt, status);
   }
 }

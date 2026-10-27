@@ -5,6 +5,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.DateTimeException;
 import java.time.LocalTime;
 import java.time.ZoneId;
 
@@ -29,6 +30,14 @@ class DealershipEntity {
   protected DealershipEntity() {}
 
   Dealership toDomain() {
-    return new Dealership(id, name, ZoneId.of(zoneId), opensAt, closesAt);
+    return new Dealership(id, name, zone(), opensAt, closesAt);
+  }
+
+  private ZoneId zone() {
+    try {
+      return ZoneId.of(zoneId);
+    } catch (DateTimeException e) {
+      throw new IllegalStateException("Dealership " + id + " has an invalid zone_id: " + zoneId, e);
+    }
   }
 }
