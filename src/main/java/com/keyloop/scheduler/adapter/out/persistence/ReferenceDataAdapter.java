@@ -12,23 +12,41 @@ import org.springframework.stereotype.Component;
 @Component
 class ReferenceDataAdapter implements ReferenceDataPort {
 
+  private final DealershipJpaRepository dealerships;
+  private final VehicleJpaRepository vehicles;
+  private final ServiceTypeJpaRepository serviceTypes;
+  private final TechnicianJpaRepository technicians;
+
+  ReferenceDataAdapter(
+      DealershipJpaRepository dealerships,
+      VehicleJpaRepository vehicles,
+      ServiceTypeJpaRepository serviceTypes,
+      TechnicianJpaRepository technicians) {
+    this.dealerships = dealerships;
+    this.vehicles = vehicles;
+    this.serviceTypes = serviceTypes;
+    this.technicians = technicians;
+  }
+
   @Override
   public Optional<Dealership> findDealership(long id) {
-    throw new UnsupportedOperationException("not implemented");
+    return dealerships.findById(id).map(DealershipEntity::toDomain);
   }
 
   @Override
   public Optional<Vehicle> findVehicle(long id) {
-    throw new UnsupportedOperationException("not implemented");
+    return vehicles.findById(id).map(VehicleEntity::toDomain);
   }
 
   @Override
   public Optional<ServiceType> findServiceType(long id) {
-    throw new UnsupportedOperationException("not implemented");
+    return serviceTypes.findById(id).map(ServiceTypeEntity::toDomain);
   }
 
   @Override
   public List<Technician> findQualifiedTechnicians(long dealershipId, long serviceTypeId) {
-    throw new UnsupportedOperationException("not implemented");
+    return technicians.findQualified(dealershipId, serviceTypeId).stream()
+        .map(TechnicianEntity::toDomain)
+        .toList();
   }
 }
