@@ -4,6 +4,7 @@ import com.keyloop.scheduler.application.port.out.AppointmentPort;
 import com.keyloop.scheduler.application.service.ResourceConflictException;
 import com.keyloop.scheduler.application.service.ResourceConflictException.Kind;
 import com.keyloop.scheduler.domain.Appointment;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,6 +31,11 @@ class AppointmentAdapter implements AppointmentPort {
     } catch (RuntimeException e) {
       throw translate(e);
     }
+  }
+
+  @Override
+  public Optional<Appointment> findById(long id) {
+    throw new UnsupportedOperationException("not implemented");
   }
 
   /** 23P01 and 40P01 become {@link ResourceConflictException}; anything else is returned as is. */

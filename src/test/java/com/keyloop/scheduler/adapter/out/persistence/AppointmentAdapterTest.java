@@ -172,6 +172,31 @@ class AppointmentAdapterTest {
     assertThat(stored.endAt()).isEqualTo(endInDb.toInstant());
   }
 
+  @Test
+  void findsStoredAppointmentById() {
+    Appointment stored =
+        appointments.insert(
+            appointment(technician1, bay1, vehicle1, AT_10_00, AT_11_00, CONFIRMED));
+
+    assertThat(appointments.findById(stored.id())).contains(stored);
+  }
+
+  @Test
+  void findsCancelledAppointmentById() {
+    Appointment stored =
+        appointments.insert(
+            appointment(technician1, bay1, vehicle1, AT_10_00, AT_11_00, CANCELLED));
+
+    assertThat(appointments.findById(stored.id())).contains(stored);
+  }
+
+  @Test
+  void returnsEmptyWhenIdIsUnknown() {
+    appointments.insert(appointment(technician1, bay1, vehicle1, AT_10_00, AT_11_00, CONFIRMED));
+
+    assertThat(appointments.findById(Long.MAX_VALUE)).isEmpty();
+  }
+
   private void assertExclusion(Appointment loser, String constraint) {
     assertThatThrownBy(() -> appointments.insert(loser))
         .isInstanceOfSatisfying(
