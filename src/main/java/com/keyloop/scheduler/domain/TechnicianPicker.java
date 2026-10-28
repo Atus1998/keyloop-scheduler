@@ -17,6 +17,9 @@ public final class TechnicianPicker {
   public static OptionalLong pick(List<TechnicianCandidate> freeQualifiedTechnicians) {
     Objects.requireNonNull(freeQualifiedTechnicians, "freeQualifiedTechnicians");
     return freeQualifiedTechnicians.stream()
+        .map(
+            candidate ->
+                Objects.requireNonNull(candidate, "freeQualifiedTechnicians contains null"))
         .min(FEWEST_LOAD_THEN_LOWEST_ID)
         .map(candidate -> OptionalLong.of(candidate.technicianId()))
         .orElseGet(OptionalLong::empty);

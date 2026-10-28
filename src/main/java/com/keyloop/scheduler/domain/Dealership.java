@@ -13,5 +13,9 @@ public record Dealership(
     Objects.requireNonNull(zoneId, "zoneId");
     Objects.requireNonNull(opensAt, "opensAt");
     Objects.requireNonNull(closesAt, "closesAt");
+    if (!closesAt.isAfter(opensAt)) {
+      throw new IllegalArgumentException(
+          "Dealership " + id + " must close after it opens: " + opensAt + "-" + closesAt);
+    }
   }
 }

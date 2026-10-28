@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -275,5 +276,66 @@ class BookingRulesTest {
     assertThatNullPointerException()
         .isThrownBy(() -> BookingRules.availability(OptionalLong.of(1), null))
         .withMessage("bayId");
+  }
+
+  // Edge cases: extreme starts, sub-minute now, clock-change hours, null elements
+
+  @ParameterizedTest
+  @ValueSource(strings = {"+999999999-12-31T23:59:00Z", "+1000000000-12-31T23:59:00Z"})
+  void returnsStartTooFarAheadForStartNearInstantMax(String start) {
+    assertThat(check(TOKYO, start, "2026-11-02T00:00:00Z")).contains(Reason.START_TOO_FAR_AHEAD);
+    assertThat(check(LONDON, start, "2026-11-02T00:00:00Z")).contains(Reason.START_TOO_FAR_AHEAD);
+  }
+
+  @Test
+  void allowsWholeMinuteStartJustAfterNowWithSeconds() {
+    assertThat(check(LONDON, "2026-11-02T10:01:00Z", "2026-11-02T10:00:30Z")).isEmpty();
+  }
+
+  @Test
+  void returnsStartInPastWhenStartIsTheMinuteBeforeNowWithSeconds() {
+    assertThat(check(LONDON, "2026-11-02T10:00:00Z", "2026-11-02T10:00:30Z"))
+        .contains(Reason.START_IN_PAST);
+  }
+
+  @Test
+  void startInPastWinsWhenThreeRulesFail() {
+    // In the past, outside opening hours and no qualified technician.
+    assertThat(check(LONDON, List.of(), "2026-11-02T03:00:00Z", "2026-11-02T10:00:00Z"))
+        .contains(Reason.START_IN_PAST);
+  }
+
+  @Test
+  void openingTimeInsideSkippedHourMovesForwardByTheGap() {
+    // 01:30 does not exist in London on 2026-03-29, so opening is 02:30 BST (01:30Z).
+    var earlyOpening =
+        new Dealership(
+            4, "Early", ZoneId.of("Europe/London"), LocalTime.of(1, 30), LocalTime.of(18, 0));
+
+    assertThat(check(earlyOpening, "2026-03-29T01:00:00Z", "2026-03-01T00:00:00Z"))
+        .contains(Reason.OUTSIDE_OPENING_HOURS);
+    assertThat(check(earlyOpening, "2026-03-29T01:30:00Z", "2026-03-01T00:00:00Z")).isEmpty();
+  }
+
+  @Test
+  void openingTimeInsideRepeatedHourUsesEarlierOffset() {
+    // 01:30 happens twice in London on 2026-10-25; the first one is 01:30 BST (00:30Z).
+    var earlyOpening =
+        new Dealership(
+            4, "Early", ZoneId.of("Europe/London"), LocalTime.of(1, 30), LocalTime.of(18, 0));
+
+    assertThat(check(earlyOpening, "2026-10-25T00:29:00Z", "2026-10-01T00:00:00Z"))
+        .contains(Reason.OUTSIDE_OPENING_HOURS);
+    assertThat(check(earlyOpening, "2026-10-25T00:30:00Z", "2026-10-01T00:00:00Z")).isEmpty();
+  }
+
+  @Test
+  void checkRejectsNullTechnicianInList() {
+    var technicians = Arrays.asList(new Technician(10, LONDON.id(), "Ann"), null);
+
+    assertThatNullPointerException()
+        .isThrownBy(
+            () -> check(LONDON, technicians, "2026-11-02T10:00:00Z", "2026-11-02T00:00:00Z"))
+        .withMessage("qualifiedTechnicians contains null");
   }
 }

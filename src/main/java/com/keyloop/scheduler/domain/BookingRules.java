@@ -3,6 +3,7 @@ package com.keyloop.scheduler.domain;
 import static java.time.temporal.ChronoUnit.DAYS;
 import static java.time.temporal.ChronoUnit.MINUTES;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -19,8 +20,21 @@ public final class BookingRules {
 
   public static final int MAX_DAYS_AHEAD = 90;
 
+  /**
+   * Any start this far after {@code now} is too far ahead on every calendar. Checked before the
+   * zone conversion, which throws for instants near {@link Instant#MAX}.
+   */
+  private static final Duration CERTAINLY_TOO_FAR = Duration.ofDays(MAX_DAYS_AHEAD + 2);
+
   private BookingRules() {}
 
+  /**
+   * Returns the first booking rule that {@code start} breaks, or empty when all pass.
+   *
+   * @param qualifiedTechnicians technicians that already have the skill for {@code serviceType};
+   *     this method only checks that one of them works at {@code dealership}
+   * @param now the current time from the application clock
+   */
   public static Optional<Reason> check(
       Dealership dealership,
       ServiceType serviceType,
@@ -32,6 +46,8 @@ public final class BookingRules {
     Objects.requireNonNull(qualifiedTechnicians, "qualifiedTechnicians");
     Objects.requireNonNull(start, "start");
     Objects.requireNonNull(now, "now");
+    qualifiedTechnicians.forEach(
+        technician -> Objects.requireNonNull(technician, "qualifiedTechnicians contains null"));
 
     if (!isWholeMinute(start)) {
       return Optional.of(Reason.START_NOT_WHOLE_MINUTE);
@@ -39,7 +55,8 @@ public final class BookingRules {
     if (!start.isAfter(now)) {
       return Optional.of(Reason.START_IN_PAST);
     }
-    if (isTooFarAhead(dealership.zoneId(), start, now)) {
+    if (start.isAfter(now.plus(CERTAINLY_TOO_FAR))
+        || isTooFarAhead(dealership.zoneId(), start, now)) {
       return Optional.of(Reason.START_TOO_FAR_AHEAD);
     }
     if (!fitsOpeningHours(dealership, start, start.plus(serviceType.duration()))) {
@@ -79,7 +96,11 @@ public final class BookingRules {
     return DAYS.between(today, startDate) > MAX_DAYS_AHEAD;
   }
 
-  /** Builds open and close as instants on the local start date, so clock-change days work. */
+  /**
+   * Builds open and close as instants on the local start date, so clock-change days work. A time
+   * inside a skipped hour moves forward by the gap; a time in a repeated hour uses the earlier
+   * offset (java.time rules).
+   */
   private static boolean fitsOpeningHours(Dealership dealership, Instant start, Instant end) {
     ZoneId zone = dealership.zoneId();
     LocalDate date = start.atZone(zone).toLocalDate();

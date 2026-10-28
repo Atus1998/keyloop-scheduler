@@ -11,6 +11,8 @@ public final class BayPicker {
 
   public static OptionalLong pick(List<Long> freeBayIds) {
     Objects.requireNonNull(freeBayIds, "freeBayIds");
-    return freeBayIds.stream().mapToLong(Long::longValue).min();
+    return freeBayIds.stream()
+        .mapToLong(id -> Objects.requireNonNull(id, "freeBayIds contains null"))
+        .min();
   }
 }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
+import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -54,5 +55,14 @@ class TechnicianPickerTest {
     assertThatNullPointerException()
         .isThrownBy(() -> TechnicianPicker.pick(null))
         .withMessage("freeQualifiedTechnicians");
+  }
+
+  @Test
+  void rejectsNullCandidateInList() {
+    var candidates = Arrays.asList(candidate(1, 0), null);
+
+    assertThatNullPointerException()
+        .isThrownBy(() -> TechnicianPicker.pick(candidates))
+        .withMessage("freeQualifiedTechnicians contains null");
   }
 }
