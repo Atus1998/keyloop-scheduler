@@ -1,8 +1,11 @@
-package com.keyloop.scheduler.adapter.out.persistence;
+package com.keyloop.scheduler.testsupport;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** Inserts test rows with plain SQL. Tests do not load the seed data. */
+/**
+ * Inserts test rows with plain SQL, for any test on a real database. Tests do not load the seed
+ * data.
+ */
 public final class PersistenceFixtures {
 
   public static final String DEALERSHIP_NAME = "Test dealership";

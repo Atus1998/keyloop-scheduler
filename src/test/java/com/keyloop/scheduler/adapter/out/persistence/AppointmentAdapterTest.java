@@ -11,6 +11,7 @@ import com.keyloop.scheduler.application.port.out.AppointmentPort;
 import com.keyloop.scheduler.application.service.ResourceConflictException;
 import com.keyloop.scheduler.domain.Appointment;
 import com.keyloop.scheduler.domain.AppointmentStatus;
+import com.keyloop.scheduler.testsupport.PersistenceFixtures;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.BeforeEach;

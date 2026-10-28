@@ -5,10 +5,10 @@ import static com.keyloop.scheduler.domain.AppointmentStatus.CONFIRMED;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.keyloop.scheduler.PostgresIntegrationTest;
-import com.keyloop.scheduler.adapter.out.persistence.PersistenceFixtures;
 import com.keyloop.scheduler.application.port.out.AppointmentPort;
 import com.keyloop.scheduler.domain.Appointment;
 import com.keyloop.scheduler.domain.AppointmentStatus;
+import com.keyloop.scheduler.testsupport.PersistenceFixtures;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

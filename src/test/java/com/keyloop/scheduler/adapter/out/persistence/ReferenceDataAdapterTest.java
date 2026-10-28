@@ -9,6 +9,7 @@ import com.keyloop.scheduler.domain.Dealership;
 import com.keyloop.scheduler.domain.ServiceType;
 import com.keyloop.scheduler.domain.Technician;
 import com.keyloop.scheduler.domain.Vehicle;
+import com.keyloop.scheduler.testsupport.PersistenceFixtures;
 import java.time.Duration;
 import java.time.LocalTime;
 import java.time.ZoneId;

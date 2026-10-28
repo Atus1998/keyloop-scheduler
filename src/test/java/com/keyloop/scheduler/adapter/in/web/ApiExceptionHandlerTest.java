@@ -31,6 +31,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 /** Error mapping of the web adapter. No database: the use case is a hand-written fake. */
 @WebMvcTest(AppointmentController.class)
@@ -166,6 +167,43 @@ class ApiExceptionHandlerTest {
     assertThat(result).bodyJson().doesNotHavePath("$.reason");
   }
 
+  @Test
+  void unknownPathDetailDoesNotEchoPath() {
+    var result = mvc.get().uri("/secret-path-xyz").exchange();
+
+    assertThat(result).hasStatus(HttpStatus.NOT_FOUND);
+    assertThat(result)
+        .bodyJson()
+        .extractingPath("$.detail")
+        .isEqualTo("No resource exists at this path.");
+  }
+
+  @Test
+  void logsResourceConflictAsWarningWithoutSql(CapturedOutput output) {
+    useCase.answer =
+        id -> {
+          throw new ResourceConflictException(
+              ResourceConflictException.Kind.DEADLOCK,
+              new DataIntegrityViolationException(SECRET_SQL));
+        };
+
+    assertThat(mvc.get().uri("/appointments/7")).hasStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+    assertThat(output).contains("WARN").contains("DEADLOCK").doesNotContain(SECRET_SQL);
+    assertThat(output).doesNotContain("ERROR");
+  }
+
+  @Test
+  void doesNotLogClientDisconnectAsError(CapturedOutput output) {
+    useCase.answer =
+        id -> {
+          throw sneakyThrow(new AsyncRequestNotUsableException("Broken pipe"));
+        };
+
+    mvc.get().uri("/appointments/7").exchange();
+
+    assertThat(output).doesNotContain("Unexpected error");
+  }
+
   private void assertInvalidId(MvcTestResult result) {
     assertThat(result)
         .hasStatus(HttpStatus.BAD_REQUEST)
@@ -190,6 +228,12 @@ class ApiExceptionHandlerTest {
         .doesNotContain("INSERT INTO")
         .doesNotContain("23P01")
         .doesNotContain("5432");
+  }
+
+  /** Throws a checked exception from a lambda that cannot declare it, as a controller would. */
+  @SuppressWarnings("unchecked")
+  private static <E extends Throwable> RuntimeException sneakyThrow(Throwable error) throws E {
+    throw (E) error;
   }
 
   private static Appointment appointment(long id) {

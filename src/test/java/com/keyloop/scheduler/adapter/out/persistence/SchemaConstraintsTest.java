@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.keyloop.scheduler.PostgresIntegrationTest;
+import com.keyloop.scheduler.testsupport.PersistenceFixtures;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;

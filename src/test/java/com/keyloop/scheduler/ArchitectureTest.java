@@ -56,6 +56,28 @@ class ArchitectureTest {
   }
 
   @Test
+  void domainAndApplicationDoNotDependOnHibernate() {
+    noClasses()
+        .that()
+        .resideInAnyPackage(DOMAIN, APPLICATION)
+        .should()
+        .dependOnClassesThat()
+        .resideInAPackage("org.hibernate..")
+        .check(PRODUCTION_CLASSES);
+  }
+
+  @Test
+  void inboundAdaptersDoNotDependOnOutboundAdapters() {
+    noClasses()
+        .that()
+        .resideInAPackage("com.keyloop.scheduler.adapter.in..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAPackage("com.keyloop.scheduler.adapter.out..")
+        .check(PRODUCTION_CLASSES);
+  }
+
+  @Test
   void rulesDetectASpringDependency() {
     assertThatThrownBy(
             () ->
