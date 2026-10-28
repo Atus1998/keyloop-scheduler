@@ -35,7 +35,7 @@ class AppointmentAdapter implements AppointmentPort {
 
   @Override
   public Optional<Appointment> findById(long id) {
-    throw new UnsupportedOperationException("not implemented");
+    return repository.findById(id).map(AppointmentEntity::toDomain);
   }
 
   /** 23P01 and 40P01 become {@link ResourceConflictException}; anything else is returned as is. */
