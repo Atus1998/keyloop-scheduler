@@ -20,9 +20,17 @@ public final class ParallelRunner {
 
   private ParallelRunner() {}
 
-  /** Results in the order of {@code tasks}. A task that throws fails the whole run. */
+  /**
+   * Results in the order of {@code tasks}. A task that throws fails the whole run. {@code timeout}
+   * is one deadline for starting every task and collecting every result; shutting down may wait up
+   * to {@code timeout} more.
+   */
   public static <T> List<T> runTogether(List<Callable<T>> tasks, Duration timeout)
       throws Exception {
+    if (tasks.isEmpty()) {
+      throw new IllegalArgumentException("No tasks to run");
+    }
+    long deadline = System.nanoTime() + timeout.toNanos();
     CountDownLatch ready = new CountDownLatch(tasks.size());
     CountDownLatch go = new CountDownLatch(1);
     ExecutorService executor = Executors.newFixedThreadPool(tasks.size());
@@ -37,20 +45,24 @@ public final class ParallelRunner {
                   return task.call();
                 }));
       }
-      if (!ready.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+      if (!ready.await(remaining(deadline), TimeUnit.NANOSECONDS)) {
         throw new AssertionError("Tasks did not start within " + timeout);
       }
       go.countDown();
       List<T> results = new ArrayList<>();
       for (Future<T> future : futures) {
-        results.add(future.get(timeout.toMillis(), TimeUnit.MILLISECONDS));
+        results.add(future.get(remaining(deadline), TimeUnit.NANOSECONDS));
       }
       return List.copyOf(results);
     } finally {
       executor.shutdownNow();
-      if (!executor.awaitTermination(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+      if (!executor.awaitTermination(timeout.toNanos(), TimeUnit.NANOSECONDS)) {
         throw new AssertionError("Tasks did not end within " + timeout);
       }
     }
+  }
+
+  private static long remaining(long deadline) {
+    return Math.max(0, deadline - System.nanoTime());
   }
 }

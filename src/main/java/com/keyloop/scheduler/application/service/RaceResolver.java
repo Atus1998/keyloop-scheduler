@@ -61,29 +61,27 @@ final class RaceResolver {
             attempted.serviceTypeId(),
             attempted.startAt(),
             attempted.endAt());
-    return retryMatch(slot)
-        .map(BookingResult::retried)
-        .orElseGet(() -> retryOrReject(slot, takenReason(attempted)));
+    // The retry match is read after the other checks, so it also sees what they saw.
+    return retryOrReject(slot, takenReason(attempted));
   }
 
   /**
-   * Gives the answer for a check that found something taken. Each check is its own statement and
-   * sees the latest commits (READ COMMITTED), so a booking that commits between two checks is seen
-   * only by the later one. Reading the retry match and the vehicle again after that check sees it
-   * too, and gives the same answer as if the other booking had come first. {@code SLOT_TAKEN} means
-   * nothing was seen, so there is nothing to read again.
+   * Gives the answer once a check has found {@code found}. Each check is its own statement and sees
+   * the latest commits (READ COMMITTED), so a booking that commits between two checks is seen only
+   * by the later one. The retry match is read after that check, and the vehicle again when a
+   * technician or bay was the finding, so both see the booking that check saw. A booking that
+   * commits during these reads can still change the answer; that only happens with more than one
+   * competitor.
    *
    * @throws BookingRejectedException unless the retry match now exists
    */
   BookingResult retryOrReject(Slot slot, Reason found) {
-    if (found == Reason.SLOT_TAKEN) {
-      throw new BookingRejectedException(found);
-    }
     Optional<Appointment> retryMatch = retryMatch(slot);
     if (retryMatch.isPresent()) {
       return BookingResult.retried(retryMatch.get());
     }
-    if (found != Reason.VEHICLE_BUSY
+    boolean vehicleReadBefore = found == Reason.VEHICLE_BUSY || found == Reason.SLOT_TAKEN;
+    if (!vehicleReadBefore
         && availability.isVehicleBusy(slot.vehicleId(), slot.start(), slot.end())) {
       throw new BookingRejectedException(Reason.VEHICLE_BUSY);
     }
