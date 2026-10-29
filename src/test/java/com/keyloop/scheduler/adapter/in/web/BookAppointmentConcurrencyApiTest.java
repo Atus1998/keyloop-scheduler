@@ -125,7 +125,8 @@ class BookAppointmentConcurrencyApiTest {
 
   @RepeatedTest(REPEATS)
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
-  void oneVehicleWithOverlappingStartsGetsOne201AndVehicleBusyForTheRest() throws Exception {
+  void oneVehicleWithOverlappingStartsGetsOne201AndVehicleBusyOrSlotTakenForTheRest()
+      throws Exception {
     long vehicleId = vehicleIds.get(0);
     List<String> bodies = new ArrayList<>();
     for (int minute = 0; minute < PARALLEL_REQUESTS; minute++) {
@@ -135,13 +136,15 @@ class BookAppointmentConcurrencyApiTest {
     List<Reply> replies = sendTogether(bodies);
 
     assertThat(replies).as(describe(replies)).filteredOn(r -> r.status() == 201).hasSize(1);
+    // All three constraints clash, so losers often deadlock twice before the winner commits and
+    // get 409 SLOT_TAKEN (accepted: look-again table, row 5).
     assertThat(replies)
         .as(describe(replies))
         .filteredOn(r -> r.status() != 201)
         .allSatisfy(
             r -> {
               assertThat(r.status()).isEqualTo(409);
-              assertThat(r.reason()).isEqualTo("VEHICLE_BUSY");
+              assertThat(r.reason()).isIn("VEHICLE_BUSY", "SLOT_TAKEN");
             });
     assertThat(fixtures.countAppointments()).isEqualTo(1);
   }

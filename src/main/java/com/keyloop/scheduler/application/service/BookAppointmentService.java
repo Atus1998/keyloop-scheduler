@@ -27,7 +27,8 @@ import java.util.OptionalLong;
 /**
  * Books an appointment ({@code docs/system-design.md}, section 6). Reference data and the retry
  * match are read in a read-only transaction. A retry match returns the stored appointment before
- * any booking rule runs. The availability check and the insert share one read-write transaction.
+ * any booking rule runs. The availability check and the insert share one read-write transaction. A
+ * lost race goes to {@link RaceResolver} once that transaction has rolled back.
  */
 public final class BookAppointmentService implements BookAppointmentUseCase {
 
@@ -36,6 +37,7 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
   private final AppointmentPort appointments;
   private final TransactionPort transactions;
   private final Clock clock;
+  private final RaceResolver raceResolver;
 
   public BookAppointmentService(
       ReferenceDataPort referenceData,
@@ -48,6 +50,7 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
     this.appointments = Objects.requireNonNull(appointments, "appointments");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.raceResolver = new RaceResolver(availability, appointments, transactions);
   }
 
   @Override
@@ -55,11 +58,11 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
     Objects.requireNonNull(command, "command");
     return switch (transactions.inReadOnlyTransaction(() -> load(command))) {
       case Retry retry -> BookingResult.retried(retry.existing());
-      case NewBooking newBooking -> BookingResult.created(bookNew(command, newBooking.context()));
+      case NewBooking newBooking -> bookNew(command, newBooking.context());
     };
   }
 
-  private Appointment bookNew(BookAppointmentCommand command, BookingContext context) {
+  private BookingResult bookNew(BookAppointmentCommand command, BookingContext context) {
     rejectIfPresent(
         BookingRules.check(
             context.dealership(),
@@ -69,7 +72,11 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
             clock.instant()));
     // Safe only after the check: it rejects starts near Instant.MAX.
     Instant end = command.startTime().plus(context.serviceType().duration());
-    return transactions.inTransaction(() -> reserve(command, context.dealership(), end));
+    try {
+      return transactions.inTransaction(() -> reserve(command, context.dealership(), end));
+    } catch (LostRace lost) {
+      return raceResolver.resolve(lost.attempted(), lost.conflict());
+    }
   }
 
   /**
@@ -99,10 +106,11 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
     return new NewBooking(new BookingContext(dealership, serviceType, qualified));
   }
 
-  private Appointment reserve(BookAppointmentCommand command, Dealership dealership, Instant end) {
+  private BookingResult reserve(
+      BookAppointmentCommand command, Dealership dealership, Instant end) {
     Instant start = command.startTime();
     if (availability.isVehicleBusy(command.vehicleId(), start, end)) {
-      throw new BookingRejectedException(Reason.VEHICLE_BUSY);
+      return raceResolver.retryOrReject(slot(command, dealership, end), Reason.VEHICLE_BUSY);
     }
     DealershipDay day = DealershipDay.containing(start, dealership.zoneId());
     OptionalLong technicianId =
@@ -110,8 +118,11 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
             availability.findFreeQualifiedTechnicians(
                 dealership.id(), command.serviceTypeId(), start, end, day));
     OptionalLong bayId = BayPicker.pick(availability.findFreeBayIds(dealership.id(), start, end));
-    rejectIfPresent(BookingRules.availability(technicianId, bayId));
-    return appointments.insert(
+    Optional<Reason> unavailable = BookingRules.availability(technicianId, bayId);
+    if (unavailable.isPresent()) {
+      return raceResolver.retryOrReject(slot(command, dealership, end), unavailable.get());
+    }
+    Appointment attempted =
         new Appointment(
             null,
             dealership.id(),
@@ -121,7 +132,19 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
             bayId.getAsLong(),
             start,
             end,
-            AppointmentStatus.CONFIRMED));
+            AppointmentStatus.CONFIRMED);
+    try {
+      return BookingResult.created(appointments.insert(attempted));
+    } catch (ResourceConflictException conflict) {
+      // Rethrown so the transaction still rolls back; the resolver needs the attempted row.
+      throw new LostRace(attempted, conflict);
+    }
+  }
+
+  private static RaceResolver.Slot slot(
+      BookAppointmentCommand command, Dealership dealership, Instant end) {
+    return new RaceResolver.Slot(
+        dealership.id(), command.vehicleId(), command.serviceTypeId(), command.startTime(), end);
   }
 
   private static void rejectIfPresent(Optional<Reason> reason) {
@@ -133,6 +156,27 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
 
   private static BookingRejectedException notFound(Reason reason, long id) {
     return new BookingRejectedException(reason, id);
+  }
+
+  /** The insert lost a race. Carries the row it tried to store, with its technician and bay. */
+  private static final class LostRace extends RuntimeException {
+
+    private final transient Appointment attempted;
+    private final ResourceConflictException conflict;
+
+    LostRace(Appointment attempted, ResourceConflictException conflict) {
+      super(conflict);
+      this.attempted = attempted;
+      this.conflict = conflict;
+    }
+
+    Appointment attempted() {
+      return attempted;
+    }
+
+    ResourceConflictException conflict() {
+      return conflict;
+    }
   }
 
   /** What the read-only step found: a retry match, or what a new booking needs. */

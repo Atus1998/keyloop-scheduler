@@ -23,12 +23,12 @@ class AvailabilityAdapter implements AvailabilityPort {
 
   @Override
   public boolean isTechnicianBusy(long technicianId, Instant start, Instant end) {
-    throw new UnsupportedOperationException("Not implemented yet");
+    return repository.isTechnicianBusy(technicianId, start, end);
   }
 
   @Override
   public boolean isBayBusy(long bayId, Instant start, Instant end) {
-    throw new UnsupportedOperationException("Not implemented yet");
+    return repository.isBayBusy(bayId, start, end);
   }
 
   @Override

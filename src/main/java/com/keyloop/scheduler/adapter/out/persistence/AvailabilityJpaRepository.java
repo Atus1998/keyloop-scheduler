@@ -31,6 +31,32 @@ interface AvailabilityJpaRepository extends Repository<AppointmentEntity, Long> 
   @Query(
       value =
           """
+          SELECT EXISTS (
+            SELECT 1 FROM appointment
+            WHERE technician_id = :technicianId AND status = 'CONFIRMED'
+              AND start_at < :endAt AND end_at > :startAt)
+          """,
+      nativeQuery = true)
+  boolean isTechnicianBusy(
+      @Param("technicianId") long technicianId,
+      @Param("startAt") Instant startAt,
+      @Param("endAt") Instant endAt);
+
+  @Query(
+      value =
+          """
+          SELECT EXISTS (
+            SELECT 1 FROM appointment
+            WHERE bay_id = :bayId AND status = 'CONFIRMED'
+              AND start_at < :endAt AND end_at > :startAt)
+          """,
+      nativeQuery = true)
+  boolean isBayBusy(
+      @Param("bayId") long bayId, @Param("startAt") Instant startAt, @Param("endAt") Instant endAt);
+
+  @Query(
+      value =
+          """
           SELECT t.id AS "technicianId",
                  (SELECT count(*) FROM appointment d
                   WHERE d.technician_id = t.id AND d.status = 'CONFIRMED'
