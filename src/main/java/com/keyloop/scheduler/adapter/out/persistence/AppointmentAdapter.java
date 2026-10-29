@@ -9,8 +9,8 @@ import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
- * Inserts appointments. No {@code @Transactional} here: the flush must fail inside {@link #insert}
- * so the error can be translated, not later at commit.
+ * Inserts and finds appointments. No {@code @Transactional} here: the flush must fail inside {@link
+ * #insert} so the error can be translated, not later at commit.
  */
 @Component
 class AppointmentAdapter implements AppointmentPort {
@@ -42,7 +42,9 @@ class AppointmentAdapter implements AppointmentPort {
   @Override
   public Optional<Appointment> findConfirmedRetryMatch(
       long dealershipId, long vehicleId, long serviceTypeId, Instant start) {
-    return Optional.empty();
+    return repository
+        .findConfirmedRetryMatch(dealershipId, vehicleId, serviceTypeId, start)
+        .map(AppointmentEntity::toDomain);
   }
 
   /** 23P01 and 40P01 become {@link ResourceConflictException}; anything else is returned as is. */

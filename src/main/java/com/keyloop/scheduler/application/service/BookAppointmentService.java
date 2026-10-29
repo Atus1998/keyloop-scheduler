@@ -25,8 +25,9 @@ import java.util.Optional;
 import java.util.OptionalLong;
 
 /**
- * Books an appointment ({@code docs/system-design.md}, section 6). Reference data is read in a
- * read-only transaction. The availability check and the insert share one read-write transaction.
+ * Books an appointment ({@code docs/system-design.md}, section 6). Reference data and the retry
+ * match are read in a read-only transaction. A retry match returns the stored appointment before
+ * any booking rule runs. The availability check and the insert share one read-write transaction.
  */
 public final class BookAppointmentService implements BookAppointmentUseCase {
 
@@ -53,6 +54,9 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
   public BookingResult book(BookAppointmentCommand command) {
     Objects.requireNonNull(command, "command");
     BookingContext context = transactions.inReadOnlyTransaction(() -> loadContext(command));
+    if (context.retryMatch() != null) {
+      return BookingResult.retried(context.retryMatch());
+    }
     rejectIfPresent(
         BookingRules.check(
             context.dealership(),
@@ -66,7 +70,7 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
         transactions.inTransaction(() -> reserve(command, context.dealership(), end)));
   }
 
-  /** Checks the ids in the order of the booking checks table. */
+  /** Checks the ids in the order of the booking checks table, then looks for a retry match. */
   private BookingContext loadContext(BookAppointmentCommand command) {
     Dealership dealership =
         referenceData
@@ -79,9 +83,14 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
         referenceData
             .findServiceType(command.serviceTypeId())
             .orElseThrow(() -> notFound(Reason.SERVICE_TYPE_NOT_FOUND, command.serviceTypeId()));
+    Appointment retryMatch =
+        appointments
+            .findConfirmedRetryMatch(
+                dealership.id(), command.vehicleId(), serviceType.id(), command.startTime())
+            .orElse(null);
     List<Technician> qualified =
         referenceData.findQualifiedTechnicians(dealership.id(), serviceType.id());
-    return new BookingContext(dealership, serviceType, qualified);
+    return new BookingContext(dealership, serviceType, qualified, retryMatch);
   }
 
   private Appointment reserve(BookAppointmentCommand command, Dealership dealership, Instant end) {
@@ -120,6 +129,10 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
     return new BookingRejectedException(reason, id);
   }
 
+  /** {@code retryMatch} is null when no CONFIRMED appointment has the same booking fields. */
   private record BookingContext(
-      Dealership dealership, ServiceType serviceType, List<Technician> qualifiedTechnicians) {}
+      Dealership dealership,
+      ServiceType serviceType,
+      List<Technician> qualifiedTechnicians,
+      Appointment retryMatch) {}
 }

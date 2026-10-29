@@ -1,6 +1,7 @@
 package com.keyloop.scheduler.adapter.in.web;
 
 import com.keyloop.scheduler.application.port.in.BookAppointmentUseCase;
+import com.keyloop.scheduler.application.port.in.BookingResult;
 import com.keyloop.scheduler.application.port.in.GetAppointmentUseCase;
 import com.keyloop.scheduler.domain.Appointment;
 import jakarta.validation.Valid;
@@ -28,9 +29,13 @@ class AppointmentController {
 
   @PostMapping("/appointments")
   ResponseEntity<AppointmentResponse> book(@Valid @RequestBody BookAppointmentRequest request) {
-    Appointment booked = bookAppointment.book(request.toCommand()).appointment();
-    return ResponseEntity.created(URI.create("/appointments/" + booked.id()))
-        .body(AppointmentResponse.from(booked));
+    BookingResult result = bookAppointment.book(request.toCommand());
+    Appointment booked = result.appointment();
+    AppointmentResponse body = AppointmentResponse.from(booked);
+    if (!result.created()) {
+      return ResponseEntity.ok(body);
+    }
+    return ResponseEntity.created(URI.create("/appointments/" + booked.id())).body(body);
   }
 
   @GetMapping("/appointments/{id}")
