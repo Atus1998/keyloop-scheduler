@@ -280,5 +280,10 @@ class ApiExceptionHandlerTest {
     FakeGetAppointment fakeGetAppointment() {
       return new FakeGetAppointment();
     }
+
+    @Bean
+    FakeBookAppointment fakeBookAppointment() {
+      return new FakeBookAppointment();
+    }
   }
 }

@@ -1,5 +1,7 @@
 package com.keyloop.scheduler.testsupport;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -74,6 +76,29 @@ public final class PersistenceFixtures {
         "INSERT INTO vehicle (customer_id, registration) VALUES (?, ?) RETURNING id",
         customerId,
         registration);
+  }
+
+  /** Inserts an appointment row as given: no booking rules, only the database constraints. */
+  public long insertAppointment(
+      long dealershipId,
+      long vehicleId,
+      long serviceTypeId,
+      long technicianId,
+      long bayId,
+      Instant start,
+      Instant end,
+      String status) {
+    return insertReturningId(
+        "INSERT INTO appointment (dealership_id, vehicle_id, service_type_id, technician_id,"
+            + " bay_id, start_at, end_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        dealershipId,
+        vehicleId,
+        serviceTypeId,
+        technicianId,
+        bayId,
+        Timestamp.from(start),
+        Timestamp.from(end),
+        status);
   }
 
   public int countAppointments() {
