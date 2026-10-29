@@ -15,7 +15,9 @@ interface AppointmentJpaRepository extends JpaRepository<AppointmentEntity, Long
   @Query(
       value =
           """
-          SELECT * FROM appointment
+          SELECT id, dealership_id, vehicle_id, service_type_id, technician_id, bay_id,
+                 start_at, end_at, status
+          FROM appointment
           WHERE dealership_id = :dealershipId AND vehicle_id = :vehicleId
             AND service_type_id = :serviceTypeId AND start_at = :startAt
             AND status = 'CONFIRMED'

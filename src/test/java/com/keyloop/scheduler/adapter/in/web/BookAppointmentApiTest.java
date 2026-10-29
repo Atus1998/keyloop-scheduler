@@ -328,6 +328,17 @@ class BookAppointmentApiTest {
   }
 
   @Test
+  void returns404ForUnknownDealershipEvenWhenVehicleIsBookedAtThatStart() {
+    assertThat(post(request(START))).hasStatus(HttpStatus.CREATED);
+
+    assertRejected(
+        post(request(UNKNOWN_ID, vehicleId, serviceTypeId, START)),
+        HttpStatus.NOT_FOUND,
+        "DEALERSHIP_NOT_FOUND");
+    assertThat(fixtures.countAppointments()).isEqualTo(1);
+  }
+
+  @Test
   void returns201WhenMatchingAppointmentIsCancelled() {
     fixtures.insertAppointment(
         dealershipId,

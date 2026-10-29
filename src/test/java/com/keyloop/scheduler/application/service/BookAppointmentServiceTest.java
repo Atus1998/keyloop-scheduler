@@ -12,11 +12,17 @@ import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
 import com.keyloop.scheduler.application.port.out.TransactionPort;
 import com.keyloop.scheduler.domain.Appointment;
 import com.keyloop.scheduler.domain.AppointmentStatus;
+import com.keyloop.scheduler.domain.Dealership;
 import com.keyloop.scheduler.domain.Reason;
+import com.keyloop.scheduler.domain.ServiceType;
+import com.keyloop.scheduler.domain.Technician;
+import com.keyloop.scheduler.domain.Vehicle;
 import com.keyloop.scheduler.testsupport.PersistenceFixtures;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -336,6 +342,25 @@ class BookAppointmentServiceTest {
     assertThat(fixtures.countAppointments()).isEqualTo(1);
   }
 
+  @Test
+  void doesNotReadQualifiedTechniciansOnRetry() {
+    skilledTechnician("Technician");
+    service(NOW).book(command(START));
+    var counting = new CountingReferenceData(referenceData);
+
+    BookingResult retry =
+        new BookAppointmentService(
+                counting,
+                availability,
+                appointments,
+                transactions,
+                Clock.fixed(NOW, ZoneOffset.UTC))
+            .book(command(START));
+
+    assertThat(retry.created()).isFalse();
+    assertThat(counting.qualifiedTechnicianReads).isZero();
+  }
+
   private BookAppointmentService service(Instant now) {
     return new BookAppointmentService(
         referenceData, availability, appointments, transactions, Clock.fixed(now, ZoneOffset.UTC));
@@ -366,5 +391,37 @@ class BookAppointmentServiceTest {
         Instant.parse(start),
         Instant.parse(end),
         status);
+  }
+
+  /** Delegates to the real port and counts qualified-technician reads. */
+  private static final class CountingReferenceData implements ReferenceDataPort {
+
+    private final ReferenceDataPort delegate;
+    int qualifiedTechnicianReads;
+
+    CountingReferenceData(ReferenceDataPort delegate) {
+      this.delegate = delegate;
+    }
+
+    @Override
+    public Optional<Dealership> findDealership(long id) {
+      return delegate.findDealership(id);
+    }
+
+    @Override
+    public Optional<Vehicle> findVehicle(long id) {
+      return delegate.findVehicle(id);
+    }
+
+    @Override
+    public Optional<ServiceType> findServiceType(long id) {
+      return delegate.findServiceType(id);
+    }
+
+    @Override
+    public List<Technician> findQualifiedTechnicians(long dealershipId, long serviceTypeId) {
+      qualifiedTechnicianReads++;
+      return delegate.findQualifiedTechnicians(dealershipId, serviceTypeId);
+    }
   }
 }
