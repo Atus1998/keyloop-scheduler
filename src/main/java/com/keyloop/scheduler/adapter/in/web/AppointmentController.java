@@ -28,7 +28,7 @@ class AppointmentController {
 
   @PostMapping("/appointments")
   ResponseEntity<AppointmentResponse> book(@Valid @RequestBody BookAppointmentRequest request) {
-    Appointment booked = bookAppointment.book(request.toCommand());
+    Appointment booked = bookAppointment.book(request.toCommand()).appointment();
     return ResponseEntity.created(URI.create("/appointments/" + booked.id()))
         .body(AppointmentResponse.from(booked));
   }

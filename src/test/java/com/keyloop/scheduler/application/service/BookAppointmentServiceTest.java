@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.keyloop.scheduler.PostgresIntegrationTest;
 import com.keyloop.scheduler.application.port.in.BookAppointmentCommand;
+import com.keyloop.scheduler.application.port.in.BookingResult;
 import com.keyloop.scheduler.application.port.out.AppointmentPort;
 import com.keyloop.scheduler.application.port.out.AvailabilityPort;
 import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
@@ -59,7 +60,7 @@ class BookAppointmentServiceTest {
   void storesConfirmedAppointmentWithEndFromServiceDuration() {
     long technicianId = skilledTechnician("Only");
 
-    Appointment booked = service(NOW).book(command(START));
+    Appointment booked = service(NOW).book(command(START)).appointment();
 
     assertThat(booked.id()).isNotNull();
     assertThat(booked)
@@ -83,7 +84,7 @@ class BookAppointmentServiceTest {
     long lessBusy = skilledTechnician("Less busy");
     bookOther(busier, "2030-10-22T12:00:00Z", "2030-10-22T13:00:00Z", "CONFIRMED");
 
-    assertThat(service(NOW).book(command(START)).technicianId()).isEqualTo(lessBusy);
+    assertThat(service(NOW).book(command(START)).appointment().technicianId()).isEqualTo(lessBusy);
   }
 
   @Test
@@ -93,7 +94,7 @@ class BookAppointmentServiceTest {
     bookOther(first, "2030-10-22T12:00:00Z", "2030-10-22T13:00:00Z", "CONFIRMED");
     bookOther(second, "2030-10-22T14:00:00Z", "2030-10-22T15:00:00Z", "CONFIRMED");
 
-    assertThat(service(NOW).book(command(START)).technicianId()).isEqualTo(first);
+    assertThat(service(NOW).book(command(START)).appointment().technicianId()).isEqualTo(first);
   }
 
   @Test
@@ -104,7 +105,7 @@ class BookAppointmentServiceTest {
     bookOther(free, "2030-10-22T12:00:00Z", "2030-10-22T13:00:00Z", "CONFIRMED");
     bookOther(free, "2030-10-22T14:00:00Z", "2030-10-22T15:00:00Z", "CONFIRMED");
 
-    assertThat(service(NOW).book(command(START)).technicianId()).isEqualTo(free);
+    assertThat(service(NOW).book(command(START)).appointment().technicianId()).isEqualTo(free);
   }
 
   @Test
@@ -112,7 +113,7 @@ class BookAppointmentServiceTest {
     fixtures.insertTechnician(dealershipId, "Unskilled");
     long skilled = skilledTechnician("Skilled");
 
-    assertThat(service(NOW).book(command(START)).technicianId()).isEqualTo(skilled);
+    assertThat(service(NOW).book(command(START)).appointment().technicianId()).isEqualTo(skilled);
   }
 
   @Test
@@ -123,7 +124,7 @@ class BookAppointmentServiceTest {
     bookOther(first, "2030-10-22T14:00:00Z", "2030-10-22T15:00:00Z", "CANCELLED");
     bookOther(second, "2030-10-22T12:00:00Z", "2030-10-22T13:00:00Z", "CONFIRMED");
 
-    assertThat(service(NOW).book(command(START)).technicianId()).isEqualTo(first);
+    assertThat(service(NOW).book(command(START)).appointment().technicianId()).isEqualTo(first);
   }
 
   @Test
@@ -135,7 +136,8 @@ class BookAppointmentServiceTest {
     bookOther(first, "2030-10-27T23:30:00Z", "2030-10-27T23:45:00Z", "CONFIRMED");
     bookOther(second, "2030-10-27T14:00:00Z", "2030-10-27T15:00:00Z", "CONFIRMED");
 
-    Appointment booked = service(NOW).book(command(Instant.parse("2030-10-27T10:00:00Z")));
+    Appointment booked =
+        service(NOW).book(command(Instant.parse("2030-10-27T10:00:00Z"))).appointment();
 
     assertThat(booked.technicianId()).isEqualTo(second);
   }
@@ -149,7 +151,8 @@ class BookAppointmentServiceTest {
 
     Appointment booked =
         service(Instant.parse("2030-03-25T00:00:00Z"))
-            .book(command(Instant.parse("2030-03-31T09:00:00Z")));
+            .book(command(Instant.parse("2030-03-31T09:00:00Z")))
+            .appointment();
 
     assertThat(booked.technicianId()).isEqualTo(first);
   }
@@ -170,7 +173,7 @@ class BookAppointmentServiceTest {
         Instant.parse("2030-10-22T09:00:00Z"),
         "CONFIRMED");
 
-    assertThat(service(NOW).book(command(START)).bayId()).isEqualTo(secondBay);
+    assertThat(service(NOW).book(command(START)).appointment().bayId()).isEqualTo(secondBay);
   }
 
   @Test
@@ -247,6 +250,90 @@ class BookAppointmentServiceTest {
               assertThat(e.reason()).isEqualTo(Reason.DEALERSHIP_NOT_FOUND);
               assertThat(e.id()).hasValue(999_999);
             });
+  }
+
+  @Test
+  void returnsExistingAppointmentAsRetryWhenSameBookingIsConfirmed() {
+    skilledTechnician("Technician");
+    BookingResult first = service(NOW).book(command(START));
+
+    BookingResult second = service(NOW).book(command(START));
+
+    assertThat(first.created()).isTrue();
+    assertThat(second.created()).isFalse();
+    assertThat(second.appointment()).isEqualTo(first.appointment());
+  }
+
+  @Test
+  void addsNoRowOnRetry() {
+    skilledTechnician("Technician");
+    service(NOW).book(command(START));
+
+    service(NOW).book(command(START));
+
+    assertThat(fixtures.countAppointments()).isEqualTo(1);
+  }
+
+  @Test
+  void returnsRetryEvenWhenStartHasPassedSinceFirstBooking() {
+    skilledTechnician("Technician");
+    Appointment first = service(NOW).book(command(START)).appointment();
+
+    BookingResult second = service(START.plusSeconds(3600)).book(command(START));
+
+    assertThat(second.created()).isFalse();
+    assertThat(second.appointment()).isEqualTo(first);
+  }
+
+  @Test
+  void returnsRetryEvenWhenServiceIsNoLongerOffered() {
+    skilledTechnician("Technician");
+    Appointment first = service(NOW).book(command(START)).appointment();
+    jdbc.update("DELETE FROM technician_skill");
+
+    BookingResult second = service(NOW).book(command(START));
+
+    assertThat(second.created()).isFalse();
+    assertThat(second.appointment()).isEqualTo(first);
+  }
+
+  @Test
+  void booksNewAppointmentWhenMatchingOneIsCancelled() {
+    long technicianId = skilledTechnician("Technician");
+    long cancelledId =
+        fixtures.insertAppointment(
+            dealershipId,
+            vehicleId,
+            serviceTypeId,
+            technicianId,
+            bayId,
+            START,
+            Instant.parse("2030-10-22T09:30:00Z"),
+            "CANCELLED");
+
+    BookingResult result = service(NOW).book(command(START));
+
+    assertThat(result.created()).isTrue();
+    assertThat(result.appointment().id()).isNotEqualTo(cancelledId);
+    assertThat(fixtures.countAppointments()).isEqualTo(2);
+  }
+
+  @Test
+  void rejectsWithVehicleBusyWhenSameStartButOtherServiceType() {
+    long technicianId = skilledTechnician("Technician");
+    long tyres = fixtures.insertServiceType("Tyres", 60);
+    fixtures.insertSkill(technicianId, tyres);
+    fixtures.insertBay(dealershipId);
+    service(NOW).book(command(START));
+
+    assertThatThrownBy(
+            () ->
+                service(NOW)
+                    .book(new BookAppointmentCommand(dealershipId, vehicleId, tyres, START)))
+        .isInstanceOfSatisfying(
+            BookingRejectedException.class,
+            e -> assertThat(e.reason()).isEqualTo(Reason.VEHICLE_BUSY));
+    assertThat(fixtures.countAppointments()).isEqualTo(1);
   }
 
   private BookAppointmentService service(Instant now) {

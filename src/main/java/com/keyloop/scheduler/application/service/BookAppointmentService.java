@@ -2,6 +2,7 @@ package com.keyloop.scheduler.application.service;
 
 import com.keyloop.scheduler.application.port.in.BookAppointmentCommand;
 import com.keyloop.scheduler.application.port.in.BookAppointmentUseCase;
+import com.keyloop.scheduler.application.port.in.BookingResult;
 import com.keyloop.scheduler.application.port.out.AppointmentPort;
 import com.keyloop.scheduler.application.port.out.AvailabilityPort;
 import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
@@ -49,7 +50,7 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
   }
 
   @Override
-  public Appointment book(BookAppointmentCommand command) {
+  public BookingResult book(BookAppointmentCommand command) {
     Objects.requireNonNull(command, "command");
     BookingContext context = transactions.inReadOnlyTransaction(() -> loadContext(command));
     rejectIfPresent(
@@ -61,7 +62,8 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
             clock.instant()));
     // Safe only after the check: it rejects starts near Instant.MAX.
     Instant end = command.startTime().plus(context.serviceType().duration());
-    return transactions.inTransaction(() -> reserve(command, context.dealership(), end));
+    return BookingResult.created(
+        transactions.inTransaction(() -> reserve(command, context.dealership(), end)));
   }
 
   /** Checks the ids in the order of the booking checks table. */

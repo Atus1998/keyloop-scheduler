@@ -198,6 +198,49 @@ class AppointmentAdapterTest {
     assertThat(appointments.findById(Long.MAX_VALUE)).isEmpty();
   }
 
+  @Test
+  void findsConfirmedRetryMatch() {
+    Appointment stored =
+        appointments.insert(
+            appointment(technician1, bay1, vehicle1, AT_10_00, AT_11_00, CONFIRMED));
+
+    assertThat(
+            appointments.findConfirmedRetryMatch(dealershipId, vehicle1, serviceTypeId, AT_10_00))
+        .contains(stored);
+  }
+
+  @Test
+  void ignoresCancelledRetryMatch() {
+    appointments.insert(appointment(technician1, bay1, vehicle1, AT_10_00, AT_11_00, CANCELLED));
+
+    assertThat(
+            appointments.findConfirmedRetryMatch(dealershipId, vehicle1, serviceTypeId, AT_10_00))
+        .isEmpty();
+  }
+
+  @Test
+  void ignoresOtherDealershipVehicleServiceTypeOrStart() {
+    appointments.insert(appointment(technician1, bay1, vehicle1, AT_10_00, AT_11_00, CONFIRMED));
+    long otherDealership = fixtures.insertDealership();
+    long otherServiceType = fixtures.insertServiceType("Tyres", 60);
+
+    assertThat(
+            appointments.findConfirmedRetryMatch(
+                otherDealership, vehicle1, serviceTypeId, AT_10_00))
+        .isEmpty();
+    assertThat(
+            appointments.findConfirmedRetryMatch(dealershipId, vehicle2, serviceTypeId, AT_10_00))
+        .isEmpty();
+    assertThat(
+            appointments.findConfirmedRetryMatch(
+                dealershipId, vehicle1, otherServiceType, AT_10_00))
+        .isEmpty();
+    assertThat(
+            appointments.findConfirmedRetryMatch(
+                dealershipId, vehicle1, serviceTypeId, AT_10_00.plusSeconds(60)))
+        .isEmpty();
+  }
+
   private void assertExclusion(Appointment loser, String constraint) {
     assertThatThrownBy(() -> appointments.insert(loser))
         .isInstanceOfSatisfying(

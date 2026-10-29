@@ -71,6 +71,19 @@ class PostAppointmentRequestTest {
   }
 
   @Test
+  void returns200WithoutLocationWhenUseCaseReportsRetry() {
+    useCase.retry = true;
+
+    MvcTestResult result = post(VALID);
+
+    assertThat(result)
+        .hasStatus(HttpStatus.OK)
+        .hasContentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+        .doesNotContainHeader("Location");
+    assertThat(result).bodyJson().extractingPath("$.id").isEqualTo(101);
+  }
+
+  @Test
   void ignoresUnknownFields() {
     String body =
         """

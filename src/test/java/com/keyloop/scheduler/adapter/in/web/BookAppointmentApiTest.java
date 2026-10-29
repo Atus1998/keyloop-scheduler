@@ -288,6 +288,73 @@ class BookAppointmentApiTest {
     assertThat(post(request(START))).hasStatus(HttpStatus.CREATED);
   }
 
+  @Test
+  void returns200WithSameIdAndBodyAndNoLocationOnSequentialRetry() throws Exception {
+    MvcTestResult first = post(request(START));
+    assertThat(first).hasStatus(HttpStatus.CREATED);
+    String firstBody = first.getResponse().getContentAsString();
+
+    MvcTestResult second = post(request(START));
+
+    assertThat(second)
+        .hasStatus(HttpStatus.OK)
+        .hasContentTypeCompatibleWith(MediaType.APPLICATION_JSON)
+        .doesNotContainHeader("Location");
+    assertThat(second).bodyJson().isStrictlyEqualTo(firstBody);
+    assertThat(fixtures.countAppointments()).isEqualTo(1);
+  }
+
+  @Test
+  void matchesRetrySentWithAnotherOffsetForTheSameInstant() {
+    MvcTestResult first = post(request(START));
+    assertThat(first).hasStatus(HttpStatus.CREATED);
+    long id = storedId();
+
+    MvcTestResult second = post(request("2030-10-22T08:00:00Z"));
+
+    assertThat(second).hasStatus(HttpStatus.OK);
+    assertThat(second).bodyJson().extractingPath("$.id").isEqualTo((int) id);
+  }
+
+  @Test
+  void returns404ForUnknownServiceTypeEvenWhenVehicleIsBookedAtThatStart() {
+    assertThat(post(request(START))).hasStatus(HttpStatus.CREATED);
+
+    assertRejected(
+        post(request(dealershipId, vehicleId, UNKNOWN_ID, START)),
+        HttpStatus.NOT_FOUND,
+        "SERVICE_TYPE_NOT_FOUND");
+    assertThat(fixtures.countAppointments()).isEqualTo(1);
+  }
+
+  @Test
+  void returns201WhenMatchingAppointmentIsCancelled() {
+    fixtures.insertAppointment(
+        dealershipId,
+        vehicleId,
+        serviceTypeId,
+        technicianId,
+        bayId,
+        at("2030-10-22T08:00:00Z"),
+        at("2030-10-22T09:30:00Z"),
+        "CANCELLED");
+
+    assertThat(post(request(START))).hasStatus(HttpStatus.CREATED);
+    assertThat(fixtures.countAppointments()).isEqualTo(2);
+  }
+
+  @Test
+  void returns409VehicleBusyWhenSameStartButOtherServiceType() {
+    long tyres = fixtures.insertServiceType("Tyres", 60);
+    fixtures.insertSkill(technicianId, tyres);
+    fixtures.insertBay(dealershipId);
+    assertThat(post(request(START))).hasStatus(HttpStatus.CREATED);
+
+    assertRejected(
+        post(request(dealershipId, vehicleId, tyres, START)), HttpStatus.CONFLICT, "VEHICLE_BUSY");
+    assertThat(fixtures.countAppointments()).isEqualTo(1);
+  }
+
   private void assertUnprocessable(String startTime, String reason) {
     assertRejected(post(request(startTime)), HttpStatus.UNPROCESSABLE_CONTENT, reason);
     assertThat(fixtures.countAppointments()).isZero();
