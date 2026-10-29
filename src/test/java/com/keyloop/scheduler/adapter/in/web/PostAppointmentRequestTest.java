@@ -193,6 +193,38 @@ class PostAppointmentRequestTest {
     assertThat(useCase.commands).isEmpty();
   }
 
+  @Test
+  void unsupportedContentTypeDetailDoesNotEchoHeader() {
+    MvcTestResult result =
+        mvc.post()
+            .uri("/appointments")
+            .contentType("text/x-secret-marker")
+            .content(VALID)
+            .exchange();
+
+    assertThat(result).hasStatus(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+    assertThat(result)
+        .bodyJson()
+        .extractingPath("$.detail")
+        .isEqualTo("The request body must be sent as application/json.");
+    assertThat(result).bodyText().doesNotContain("x-secret-marker");
+  }
+
+  @Test
+  void rejectsOverlongStartTimeAsInvalidField() {
+    String longStart = "2026-11-03T09:00:00" + "0".repeat(60) + "+07:00";
+
+    MvcTestResult result = post(body("1", "42", "3", "\"" + longStart + "\""));
+
+    assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+    assertThat(result).bodyJson().extractingPath("$.reason").isEqualTo("INVALID_REQUEST");
+    assertThat(result)
+        .bodyJson()
+        .extractingPath("$.detail")
+        .isEqualTo("These fields are missing or invalid: startTime.");
+    assertThat(useCase.commands).isEmpty();
+  }
+
   @ParameterizedTest
   @CsvSource({
     "START_NOT_WHOLE_MINUTE, 422",

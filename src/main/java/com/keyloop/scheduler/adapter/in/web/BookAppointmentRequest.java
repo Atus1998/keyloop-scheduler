@@ -3,6 +3,7 @@ package com.keyloop.scheduler.adapter.in.web;
 import com.keyloop.scheduler.application.port.in.BookAppointmentCommand;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -16,7 +17,10 @@ record BookAppointmentRequest(
     @NotNull @Positive Long dealershipId,
     @NotNull @Positive Long vehicleId,
     @NotNull @Positive Long serviceTypeId,
-    @NotNull String startTime) {
+    @NotNull @Size(max = MAX_START_TIME_LENGTH) String startTime) {
+
+  /** Longer than any valid ISO-8601 date-time with an offset and nanoseconds. */
+  static final int MAX_START_TIME_LENGTH = 64;
 
   static final String INVALID_START_DETAIL =
       "startTime must be an ISO-8601 date-time with an offset, for example"

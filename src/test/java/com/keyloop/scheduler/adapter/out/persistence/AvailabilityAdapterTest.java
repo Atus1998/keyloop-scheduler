@@ -11,6 +11,8 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -76,6 +78,49 @@ class AvailabilityAdapterTest {
     book(firstTechnicianId, firstBayId, "2030-10-22T09:00:00Z", "2030-10-22T10:00:00Z");
 
     assertThat(freeTechnicians()).containsExactly(new TechnicianCandidate(secondTechnicianId, 0));
+  }
+
+  /** Every way a row can overlap {@code [08:00, 09:30)}. */
+  @ParameterizedTest
+  @CsvSource({
+    "2030-10-22T07:30:00Z, 2030-10-22T08:30:00Z",
+    "2030-10-22T07:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:30:00Z, 2030-10-22T09:00:00Z",
+    "2030-10-22T09:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:00:00Z, 2030-10-22T09:30:00Z"
+  })
+  void excludesTechnicianForEveryOverlapShape(Instant start, Instant end) {
+    book(firstTechnicianId, firstBayId, start, end, "CONFIRMED");
+
+    assertThat(freeTechnicians()).containsExactly(new TechnicianCandidate(secondTechnicianId, 0));
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "2030-10-22T07:30:00Z, 2030-10-22T08:30:00Z",
+    "2030-10-22T07:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:30:00Z, 2030-10-22T09:00:00Z",
+    "2030-10-22T09:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:00:00Z, 2030-10-22T09:30:00Z"
+  })
+  void excludesBayForEveryOverlapShape(Instant start, Instant end) {
+    book(unskilledTechnicianId, firstBayId, start, end, "CONFIRMED");
+
+    assertThat(availability.findFreeBayIds(dealershipId, START, END)).containsExactly(secondBayId);
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "2030-10-22T07:30:00Z, 2030-10-22T08:30:00Z",
+    "2030-10-22T07:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:30:00Z, 2030-10-22T09:00:00Z",
+    "2030-10-22T09:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:00:00Z, 2030-10-22T09:30:00Z"
+  })
+  void vehicleIsBusyForEveryOverlapShape(Instant start, Instant end) {
+    bookVehicle(start, end, "CONFIRMED");
+
+    assertThat(availability.isVehicleBusy(vehicleId, START, END)).isTrue();
   }
 
   @Test

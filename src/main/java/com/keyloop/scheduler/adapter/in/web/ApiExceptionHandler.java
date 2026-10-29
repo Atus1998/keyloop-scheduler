@@ -14,6 +14,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -31,6 +32,8 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
   static final String UNEXPECTED_DETAIL = "An unexpected error occurred.";
   static final String NO_RESOURCE_DETAIL = "No resource exists at this path.";
+  static final String UNSUPPORTED_MEDIA_TYPE_DETAIL =
+      "The request body must be sent as application/json.";
   static final String UNREADABLE_BODY_DETAIL =
       "The request body must be a JSON object with fields of the right type.";
 
@@ -70,6 +73,17 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
   protected ResponseEntity<Object> handleNoResourceFoundException(
       NoResourceFoundException e, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
     ProblemDetail body = ProblemDetail.forStatusAndDetail(status, NO_RESOURCE_DETAIL);
+    return handleExceptionInternal(e, body, headers, status, request);
+  }
+
+  /** Spring's default detail repeats the client's Content-Type. Use a fixed one. */
+  @Override
+  protected ResponseEntity<Object> handleHttpMediaTypeNotSupported(
+      HttpMediaTypeNotSupportedException e,
+      HttpHeaders headers,
+      HttpStatusCode status,
+      WebRequest request) {
+    ProblemDetail body = ProblemDetail.forStatusAndDetail(status, UNSUPPORTED_MEDIA_TYPE_DETAIL);
     return handleExceptionInternal(e, body, headers, status, request);
   }
 

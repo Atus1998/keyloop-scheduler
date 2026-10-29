@@ -108,9 +108,10 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
   }
 
   private static void rejectIfPresent(Optional<Reason> reason) {
-    if (reason.isPresent()) {
-      throw new BookingRejectedException(reason.get());
-    }
+    reason.ifPresent(
+        rejected -> {
+          throw new BookingRejectedException(rejected);
+        });
   }
 
   private static BookingRejectedException notFound(Reason reason, long id) {

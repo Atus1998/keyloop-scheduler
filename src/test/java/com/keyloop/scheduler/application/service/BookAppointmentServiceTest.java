@@ -196,6 +196,47 @@ class BookAppointmentServiceTest {
   }
 
   @Test
+  void rejectsWithNoBayAndStoresNothingWhenTheOnlyBayIsTaken() {
+    skilledTechnician("Technician");
+    long otherTechnician = fixtures.insertTechnician(dealershipId, "Other");
+    fixtures.insertAppointment(
+        dealershipId,
+        otherVehicleId,
+        serviceTypeId,
+        otherTechnician,
+        bayId,
+        START,
+        Instant.parse("2030-10-22T09:00:00Z"),
+        "CONFIRMED");
+
+    assertThatThrownBy(() -> service(NOW).book(command(START)))
+        .isInstanceOfSatisfying(
+            BookingRejectedException.class, e -> assertThat(e.reason()).isEqualTo(Reason.NO_BAY));
+    assertThat(fixtures.countAppointments()).isEqualTo(1);
+  }
+
+  @Test
+  void rejectsWithVehicleBusyAndStoresNothing() {
+    long technicianId = skilledTechnician("Technician");
+    long secondBay = fixtures.insertBay(dealershipId);
+    fixtures.insertAppointment(
+        dealershipId,
+        vehicleId,
+        serviceTypeId,
+        technicianId,
+        secondBay,
+        Instant.parse("2030-10-22T07:00:00Z"),
+        Instant.parse("2030-10-22T08:30:00Z"),
+        "CONFIRMED");
+
+    assertThatThrownBy(() -> service(NOW).book(command(START)))
+        .isInstanceOfSatisfying(
+            BookingRejectedException.class,
+            e -> assertThat(e.reason()).isEqualTo(Reason.VEHICLE_BUSY));
+    assertThat(fixtures.countAppointments()).isEqualTo(1);
+  }
+
+  @Test
   void rejectsUnknownDealershipWithItsId() {
     var command = new BookAppointmentCommand(999_999, vehicleId, serviceTypeId, START);
 
