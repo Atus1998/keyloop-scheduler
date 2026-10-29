@@ -222,6 +222,56 @@ class AvailabilityAdapterTest {
     assertThat(availability.isVehicleBusy(vehicleId, START, END)).isFalse();
   }
 
+  @ParameterizedTest
+  @CsvSource({
+    "2030-10-22T07:30:00Z, 2030-10-22T08:30:00Z",
+    "2030-10-22T07:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:30:00Z, 2030-10-22T09:00:00Z",
+    "2030-10-22T09:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:00:00Z, 2030-10-22T09:30:00Z"
+  })
+  void technicianIsBusyForEveryOverlapShape(Instant start, Instant end) {
+    book(firstTechnicianId, firstBayId, start, end, "CONFIRMED");
+
+    assertThat(availability.isTechnicianBusy(firstTechnicianId, START, END)).isTrue();
+  }
+
+  @Test
+  void technicianIsFreeWithBackToBackCancelledOrOtherTechniciansAppointments() {
+    book(firstTechnicianId, firstBayId, "2030-10-22T06:30:00Z", "2030-10-22T08:00:00Z");
+    book(firstTechnicianId, firstBayId, "2030-10-22T09:30:00Z", "2030-10-22T10:00:00Z");
+    book(firstTechnicianId, secondBayId, START, END, "CANCELLED");
+    book(secondTechnicianId, secondBayId, START, END, "CONFIRMED");
+
+    assertThat(availability.isTechnicianBusy(firstTechnicianId, START, END)).isFalse();
+    assertThat(availability.isTechnicianBusy(secondTechnicianId, START, END)).isTrue();
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "2030-10-22T07:30:00Z, 2030-10-22T08:30:00Z",
+    "2030-10-22T07:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:30:00Z, 2030-10-22T09:00:00Z",
+    "2030-10-22T09:00:00Z, 2030-10-22T10:00:00Z",
+    "2030-10-22T08:00:00Z, 2030-10-22T09:30:00Z"
+  })
+  void bayIsBusyForEveryOverlapShape(Instant start, Instant end) {
+    book(unskilledTechnicianId, firstBayId, start, end, "CONFIRMED");
+
+    assertThat(availability.isBayBusy(firstBayId, START, END)).isTrue();
+  }
+
+  @Test
+  void bayIsFreeWithBackToBackCancelledOrOtherBaysAppointments() {
+    book(unskilledTechnicianId, firstBayId, "2030-10-22T06:30:00Z", "2030-10-22T08:00:00Z");
+    book(unskilledTechnicianId, firstBayId, "2030-10-22T09:30:00Z", "2030-10-22T10:00:00Z");
+    book(firstTechnicianId, firstBayId, START, END, "CANCELLED");
+    book(secondTechnicianId, secondBayId, START, END, "CONFIRMED");
+
+    assertThat(availability.isBayBusy(firstBayId, START, END)).isFalse();
+    assertThat(availability.isBayBusy(secondBayId, START, END)).isTrue();
+  }
+
   private List<TechnicianCandidate> freeTechnicians() {
     return availability.findFreeQualifiedTechnicians(dealershipId, serviceTypeId, START, END, DAY);
   }

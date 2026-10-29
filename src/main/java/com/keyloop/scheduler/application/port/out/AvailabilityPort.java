@@ -14,6 +14,12 @@ public interface AvailabilityPort {
   /** True when the vehicle has an overlapping appointment at any dealership. */
   boolean isVehicleBusy(long vehicleId, Instant start, Instant end);
 
+  /** True when the technician has an overlapping appointment. */
+  boolean isTechnicianBusy(long technicianId, Instant start, Instant end);
+
+  /** True when the bay has an overlapping appointment. */
+  boolean isBayBusy(long bayId, Instant start, Instant end);
+
   /**
    * Free technicians of the dealership who have the skill, ordered by id, each with the number of
    * CONFIRMED appointments that start within {@code day}.

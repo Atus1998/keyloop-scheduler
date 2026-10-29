@@ -22,6 +22,16 @@ class AvailabilityAdapter implements AvailabilityPort {
   }
 
   @Override
+  public boolean isTechnicianBusy(long technicianId, Instant start, Instant end) {
+    throw new UnsupportedOperationException("Not implemented yet");
+  }
+
+  @Override
+  public boolean isBayBusy(long bayId, Instant start, Instant end) {
+    throw new UnsupportedOperationException("Not implemented yet");
+  }
+
+  @Override
   public List<TechnicianCandidate> findFreeQualifiedTechnicians(
       long dealershipId, long serviceTypeId, Instant start, Instant end, DealershipDay day) {
     return repository
