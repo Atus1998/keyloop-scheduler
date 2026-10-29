@@ -1,8 +1,10 @@
 package com.keyloop.scheduler.adapter.in.web;
 
 import com.keyloop.scheduler.application.service.AppointmentNotFoundException;
+import com.keyloop.scheduler.application.service.BookingRejectedException;
 import com.keyloop.scheduler.application.service.ResourceConflictException;
 import com.keyloop.scheduler.domain.Reason;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -10,6 +12,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
@@ -26,6 +31,8 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
   static final String UNEXPECTED_DETAIL = "An unexpected error occurred.";
   static final String NO_RESOURCE_DETAIL = "No resource exists at this path.";
+  static final String UNREADABLE_BODY_DETAIL =
+      "The request body must be a JSON object with fields of the right type.";
 
   private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
@@ -35,6 +42,12 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         HttpStatus.NOT_FOUND,
         "Appointment " + e.id() + " was not found.",
         Reason.APPOINTMENT_NOT_FOUND);
+  }
+
+  @ExceptionHandler(BookingRejectedException.class)
+  ProblemDetail handleBookingRejected(BookingRejectedException e) {
+    Reason reason = e.reason();
+    return problem(ReasonProblems.status(reason), ReasonProblems.detail(reason, e.id()), reason);
   }
 
   @ExceptionHandler(InvalidRequestException.class)
@@ -57,6 +70,39 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
   protected ResponseEntity<Object> handleNoResourceFoundException(
       NoResourceFoundException e, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
     ProblemDetail body = ProblemDetail.forStatusAndDetail(status, NO_RESOURCE_DETAIL);
+    return handleExceptionInternal(e, body, headers, status, request);
+  }
+
+  /** Bad JSON or a wrong type. The detail is fixed: the parser message names Java types. */
+  @Override
+  protected ResponseEntity<Object> handleHttpMessageNotReadable(
+      HttpMessageNotReadableException e,
+      HttpHeaders headers,
+      HttpStatusCode status,
+      WebRequest request) {
+    ProblemDetail body =
+        problem(HttpStatus.BAD_REQUEST, UNREADABLE_BODY_DETAIL, Reason.INVALID_REQUEST);
+    return handleExceptionInternal(e, body, headers, status, request);
+  }
+
+  /** A missing or invalid field. The detail names the fields, never their values. */
+  @Override
+  protected ResponseEntity<Object> handleMethodArgumentNotValid(
+      MethodArgumentNotValidException e,
+      HttpHeaders headers,
+      HttpStatusCode status,
+      WebRequest request) {
+    String fields =
+        e.getBindingResult().getFieldErrors().stream()
+            .map(FieldError::getField)
+            .distinct()
+            .sorted()
+            .collect(Collectors.joining(", "));
+    ProblemDetail body =
+        problem(
+            HttpStatus.BAD_REQUEST,
+            "These fields are missing or invalid: " + fields + ".",
+            Reason.INVALID_REQUEST);
     return handleExceptionInternal(e, body, headers, status, request);
   }
 

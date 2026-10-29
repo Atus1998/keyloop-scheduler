@@ -1,8 +1,14 @@
 package com.keyloop.scheduler.config;
 
+import com.keyloop.scheduler.application.port.in.BookAppointmentUseCase;
 import com.keyloop.scheduler.application.port.in.GetAppointmentUseCase;
 import com.keyloop.scheduler.application.port.out.AppointmentPort;
+import com.keyloop.scheduler.application.port.out.AvailabilityPort;
+import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
+import com.keyloop.scheduler.application.port.out.TransactionPort;
+import com.keyloop.scheduler.application.service.BookAppointmentService;
 import com.keyloop.scheduler.application.service.GetAppointmentService;
+import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -11,7 +17,23 @@ import org.springframework.context.annotation.Configuration;
 class BeanConfig {
 
   @Bean
+  Clock clock() {
+    return Clock.systemUTC();
+  }
+
+  @Bean
   GetAppointmentUseCase getAppointmentUseCase(AppointmentPort appointments) {
     return new GetAppointmentService(appointments);
+  }
+
+  @Bean
+  BookAppointmentUseCase bookAppointmentUseCase(
+      ReferenceDataPort referenceData,
+      AvailabilityPort availability,
+      AppointmentPort appointments,
+      TransactionPort transactions,
+      Clock clock) {
+    return new BookAppointmentService(
+        referenceData, availability, appointments, transactions, clock);
   }
 }

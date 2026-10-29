@@ -1,6 +1,7 @@
 package com.keyloop.scheduler.domain;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Objects;
 
@@ -15,7 +16,15 @@ public record DealershipDay(Instant start, Instant end) {
     }
   }
 
+  /**
+   * The local day that holds {@code instant}. It lasts 23 or 25 hours on clock-change days, and
+   * starts at the first valid local time when midnight is skipped.
+   */
   public static DealershipDay containing(Instant instant, ZoneId zone) {
-    throw new UnsupportedOperationException("Not implemented yet");
+    Objects.requireNonNull(instant, "instant");
+    Objects.requireNonNull(zone, "zone");
+    LocalDate date = instant.atZone(zone).toLocalDate();
+    return new DealershipDay(
+        date.atStartOfDay(zone).toInstant(), date.plusDays(1).atStartOfDay(zone).toInstant());
   }
 }

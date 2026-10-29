@@ -1,8 +1,15 @@
 package com.keyloop.scheduler.adapter.in.web;
 
+import com.keyloop.scheduler.application.port.in.BookAppointmentUseCase;
 import com.keyloop.scheduler.application.port.in.GetAppointmentUseCase;
+import com.keyloop.scheduler.domain.Appointment;
+import jakarta.validation.Valid;
+import java.net.URI;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -11,9 +18,19 @@ class AppointmentController {
   static final String INVALID_ID_DETAIL = "The appointment id must be a positive whole number.";
 
   private final GetAppointmentUseCase getAppointment;
+  private final BookAppointmentUseCase bookAppointment;
 
-  AppointmentController(GetAppointmentUseCase getAppointment) {
+  AppointmentController(
+      GetAppointmentUseCase getAppointment, BookAppointmentUseCase bookAppointment) {
     this.getAppointment = getAppointment;
+    this.bookAppointment = bookAppointment;
+  }
+
+  @PostMapping("/appointments")
+  ResponseEntity<AppointmentResponse> book(@Valid @RequestBody BookAppointmentRequest request) {
+    Appointment booked = bookAppointment.book(request.toCommand());
+    return ResponseEntity.created(URI.create("/appointments/" + booked.id()))
+        .body(AppointmentResponse.from(booked));
   }
 
   @GetMapping("/appointments/{id}")
