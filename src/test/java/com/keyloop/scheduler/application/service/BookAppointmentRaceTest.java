@@ -30,7 +30,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -40,6 +43,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * it.
  */
 @PostgresIntegrationTest
+@ExtendWith(OutputCaptureExtension.class)
 class BookAppointmentRaceTest {
 
   private static final Instant NOW = Instant.parse("2030-10-21T00:00:00Z");
@@ -190,6 +194,58 @@ class BookAppointmentRaceTest {
     scripted.then(throwConflict(Kind.EXCLUSION));
 
     assertThatThrownBy(this::book).isSameAs(failure);
+  }
+
+  @Test
+  void logsReplayStoredAfterDeadlock(CapturedOutput output) {
+    scripted.then(insertThenThrow(Kind.DEADLOCK)).then(scripted::insertForReal);
+
+    book();
+
+    assertThat(replayLogLines(output)).singleElement().asString().contains("outcome=stored");
+  }
+
+  @Test
+  void logsReplayLostAgainWithKindAfterDeadlock(CapturedOutput output) {
+    scripted.then(throwConflict(Kind.DEADLOCK)).then(throwConflict(Kind.DEADLOCK));
+
+    assertRejected(Reason.SLOT_TAKEN);
+
+    assertThat(replayLogLines(output))
+        .singleElement()
+        .asString()
+        .contains("outcome=lost kind=DEADLOCK");
+  }
+
+  @Test
+  void logsReplayLostToExclusionWithoutSqlOrIds(CapturedOutput output) {
+    scripted
+        .then(throwConflict(Kind.DEADLOCK))
+        .then(commitCompetitorThenInsert(otherVehicleId, technicianId, otherBayId, START, END));
+
+    assertRejected(Reason.TECHNICIAN_TAKEN);
+
+    assertThat(replayLogLines(output))
+        .singleElement()
+        .asString()
+        .contains("outcome=lost kind=EXCLUSION")
+        .doesNotContain("Scripted")
+        .doesNotContain("XY34 ZZZ")
+        .doesNotContain("23P01")
+        .doesNotContain("INSERT");
+  }
+
+  @Test
+  void doesNotLogReplayAfterExclusion(CapturedOutput output) {
+    scripted.then(throwConflict(Kind.EXCLUSION));
+
+    assertRejected(Reason.SLOT_TAKEN);
+
+    assertThat(replayLogLines(output)).isEmpty();
+  }
+
+  private static List<String> replayLogLines(CapturedOutput output) {
+    return output.getOut().lines().filter(line -> line.contains("Replay after deadlock")).toList();
   }
 
   private BookingResult book() {
