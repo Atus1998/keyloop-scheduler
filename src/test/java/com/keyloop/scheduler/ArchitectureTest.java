@@ -67,6 +67,17 @@ class ArchitectureTest {
   }
 
   @Test
+  void domainAndApplicationDoNotDependOnOpenApi() {
+    noClasses()
+        .that()
+        .resideInAnyPackage(DOMAIN, APPLICATION)
+        .should()
+        .dependOnClassesThat()
+        .resideInAnyPackage("io.swagger..", "org.springdoc..")
+        .check(PRODUCTION_CLASSES);
+  }
+
+  @Test
   void inboundAdaptersDoNotDependOnOutboundAdapters() {
     noClasses()
         .that()
