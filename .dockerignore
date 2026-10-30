@@ -1,0 +1,14 @@
+# Only gradlew, gradle/, the build files and src/ go into the image build.
+.git
+.claude
+.gradle
+.idea
+build
+out
+bin
+docs
+docker
+scripts
+*.md
+.env
+.env.*

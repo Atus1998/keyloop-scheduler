@@ -34,7 +34,7 @@ class DatabaseTimeoutsTest {
       }
       for (Connection connection : held) {
         assertThat(show(connection, "lock_timeout")).isEqualTo("5s");
-        assertThat(show(connection, "statement_timeout")).isEqualTo("10s");
+        assertThat(show(connection, "statement_timeout")).isEqualTo("30s");
       }
     } finally {
       for (Connection connection : held) {

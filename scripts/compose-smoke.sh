@@ -69,7 +69,9 @@ check "201 has a Location header" test -n "$location"
 check "GET Location gives 200" \
   test "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL$location")" = 200
 
-check "db publishes no port to the host" test -z "$(compose port db 5432 2>/dev/null || true)"
+# "docker compose port" prints ":0" for an unpublished port, so read the bindings themselves.
+check "db publishes no port to the host" \
+  test "$(docker inspect -f '{{len .HostConfig.PortBindings}}' "$(compose ps -q db)")" = 0
 check "api does not run as root" test "$(compose exec -T api id -u | tr -d '\r')" != 0
 check "app user cannot create tables" \
   bash -c "! docker compose -p $PROJECT -f compose.yaml exec -T db \
