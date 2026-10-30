@@ -7,19 +7,18 @@
 # database port; anywhere else, set SCHEDULER_MIGRATOR_PASSWORD and SCHEDULER_APP_PASSWORD.
 set -euo pipefail
 
+# Passwords are read inside psql (\getenv), so they never appear on a command line.
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
-  -v db="$POSTGRES_DB" \
-  -v migrator_password="${SCHEDULER_MIGRATOR_PASSWORD:-}" \
-  -v app_password="${SCHEDULER_APP_PASSWORD:-}" <<'SQL'
+  -v db="$POSTGRES_DB" <<'SQL'
 CREATE ROLE scheduler_migrator LOGIN;
 CREATE ROLE scheduler_app LOGIN;
 
-SELECT :'migrator_password' <> '' AS has_migrator_password \gset
-\if :has_migrator_password
+\getenv migrator_password SCHEDULER_MIGRATOR_PASSWORD
+\if :{?migrator_password}
   ALTER ROLE scheduler_migrator PASSWORD :'migrator_password';
 \endif
-SELECT :'app_password' <> '' AS has_app_password \gset
-\if :has_app_password
+\getenv app_password SCHEDULER_APP_PASSWORD
+\if :{?app_password}
   ALTER ROLE scheduler_app PASSWORD :'app_password';
 \endif
 

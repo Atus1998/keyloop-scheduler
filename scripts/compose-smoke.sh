@@ -72,11 +72,22 @@ check "GET Location gives 200" \
 # "docker compose port" prints ":0" for an unpublished port, so read the bindings themselves.
 check "db publishes no port to the host" \
   test "$(docker inspect -f '{{len .HostConfig.PortBindings}}' "$(compose ps -q db)")" = 0
-check "api does not run as root" test "$(compose exec -T api id -u | tr -d '\r')" != 0
+api_uid=$(compose exec -T api id -u 2>/dev/null | tr -d '\r' || true)
+check "api does not run as root" bash -c "[[ '$api_uid' =~ ^[0-9]+\$ && '$api_uid' != 0 ]]"
 check "app user cannot create tables" \
   bash -c "! docker compose -p $PROJECT -f compose.yaml exec -T db \
     psql -v ON_ERROR_STOP=1 -U scheduler_app -d scheduler -c 'CREATE TABLE smoke (i int)' \
     >/dev/null 2>&1"
+
+# From another container on the Compose network, over TCP like the API.
+on_network() {
+  docker run --rm --network "${PROJECT}_default" postgres:16 \
+    psql -v ON_ERROR_STOP=1 -h db "$@" -c 'SELECT 1' >/dev/null 2>&1
+}
+refused() { ! on_network "$@"; }
+check "app user reaches the scheduler database over TCP" on_network -U scheduler_app -d scheduler
+check "superuser is refused over TCP" refused -U postgres -d scheduler
+check "app user is refused on other databases over TCP" refused -U scheduler_app -d postgres
 
 echo "Restarting on the same volume..."
 compose down
@@ -91,6 +102,10 @@ seed=$(compose exec -T db psql -tA -U postgres -d scheduler -c \
   "SELECT (SELECT count(*) FROM dealership) || ',' ||
           (SELECT count(*) FROM flyway_schema_history WHERE script = 'R__seed.sql')" | tr -d '\r')
 check "seed loaded once: 2 dealerships, 1 seed run" test "$seed" = "2,1"
+check "app user cannot read the migration history after restart" \
+  bash -c "! docker compose -p $PROJECT -f compose.yaml exec -T db \
+    psql -v ON_ERROR_STOP=1 -U scheduler_app -d scheduler \
+    -c 'SELECT 1 FROM flyway_schema_history' >/dev/null 2>&1"
 
 if ((failures > 0)); then
   echo "$failures check(s) failed"

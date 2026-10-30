@@ -5,17 +5,17 @@ services:
     image: postgres:16
     environment:
       POSTGRES_DB: scheduler
-      # No password: trust auth is safe only because the database publishes no port.
-      # Never add "ports:" to this service.
+      # No passwords. Never add "ports:" to this service. 02-pg_hba.sh narrows trust to the
+      # two app users and the scheduler database; the superuser cannot connect over TCP.
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - db-data:/var/lib/postgresql/data
-      # Creates scheduler_migrator and scheduler_app on first start only (new volume).
+      # Creates the users and the access rules on first start only (new volume).
       - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # TCP, not the unix socket: the temporary server that runs the init scripts listens on
       # the socket only, so this turns healthy once the users exist.
-      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "scheduler"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "scheduler_migrator", "-d", "scheduler"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -26,7 +26,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      # Loopback only: the API, Swagger UI and metrics have no authentication.
+      - "127.0.0.1:8080:8080"
     environment:
       SPRING_PROFILES_ACTIVE: demo
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/scheduler

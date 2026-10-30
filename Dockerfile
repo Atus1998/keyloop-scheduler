@@ -3,7 +3,8 @@
 
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
-# Wrapper and build files first: this layer, with the dependencies, is reused while only src changes.
+# Wrapper and build files first. The dependencies go to a BuildKit cache mount, not a layer:
+# later builds on this machine reuse them; a new machine or CI downloads them again.
 COPY gradlew settings.gradle build.gradle ./
 COPY gradle gradle
 RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon dependencies > /dev/null

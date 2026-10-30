@@ -13,6 +13,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -76,10 +77,31 @@ class DatabaseRolesTest {
 
   @Autowired private JdbcTemplate jdbc;
   @Autowired private MockMvcTester mvc;
+  @Autowired private Flyway flyway;
 
   @Test
   void appRunsAsTheDataOnlyUser() {
     assertThat(jdbc.queryForObject("SELECT current_user", String.class)).isEqualTo("scheduler_app");
+  }
+
+  /** Flyway connects as another user, outside the pool; the app's own connections keep both. */
+  @Test
+  void appConnectionsHaveLockAndStatementTimeouts() {
+    assertThat(jdbc.queryForObject("SHOW lock_timeout", String.class)).isEqualTo("5s");
+    assertThat(jdbc.queryForObject("SHOW statement_timeout", String.class)).isEqualTo("30s");
+  }
+
+  /** afterMigrate.sql also runs when there is nothing new to migrate, as on every restart. */
+  @Test
+  void historyRightsAreTakenBackOnAMigrateWithNothingNew() throws SQLException {
+    asSuperuserExecute("GRANT SELECT ON flyway_schema_history TO scheduler_app");
+
+    var result = flyway.migrate();
+
+    assertThat(result.migrationsExecuted).isZero();
+    Throwable error =
+        catchThrowable(() -> jdbc.execute("SELECT count(*) FROM flyway_schema_history"));
+    assertThat(sqlState(error)).isEqualTo(INSUFFICIENT_PRIVILEGE);
   }
 
   @Test
@@ -146,6 +168,15 @@ class DatabaseRolesTest {
         values.add(rows.getString(1));
       }
       return List.copyOf(values);
+    }
+  }
+
+  private static void asSuperuserExecute(String sql) throws SQLException {
+    try (Connection connection =
+            DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Statement statement = connection.createStatement()) {
+      statement.execute(sql);
     }
   }
 
