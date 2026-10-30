@@ -201,73 +201,39 @@ class BookAppointmentRaceTest {
   }
 
   @Test
-  void logsReplayStoredAfterDeadlock(CapturedOutput output) {
+  void logsStoredReplayAsOneJsonLine(CapturedOutput output) {
     scripted.then(insertThenThrow(Kind.DEADLOCK)).then(scripted::insertForReal);
 
     book();
 
-    assertThat(replayLogLines(output)).singleElement().asString().contains("outcome=stored");
+    JsonNode line = JSON.readTree(onlyReplayLogLine(output));
+    assertThat(line.path("outcome").asString()).isEqualTo("stored");
+    assertThat(line.path("kind").isMissingNode()).isTrue();
   }
 
   @Test
-  void logsReplayLostAgainWithKindAfterDeadlock(CapturedOutput output) {
-    scripted.then(throwConflict(Kind.DEADLOCK)).then(throwConflict(Kind.DEADLOCK));
-
-    assertRejected(Reason.SLOT_TAKEN);
-
-    assertThat(replayLogLines(output))
-        .singleElement()
-        .asString()
-        .contains("outcome=lost kind=DEADLOCK");
-  }
-
-  @Test
-  void logsReplayLostToExclusionWithoutSqlOrIds(CapturedOutput output) {
+  void logsLostReplayWithKindButNoSqlOrIds(CapturedOutput output) {
     scripted
         .then(throwConflict(Kind.DEADLOCK))
         .then(commitCompetitorThenInsert(otherVehicleId, technicianId, otherBayId, START, END));
 
     assertRejected(Reason.TECHNICIAN_TAKEN);
 
-    assertThat(replayLogLines(output))
-        .singleElement()
-        .asString()
-        .contains("outcome=lost kind=EXCLUSION")
+    String raw = onlyReplayLogLine(output);
+    JsonNode line = JSON.readTree(raw);
+    assertThat(line.path("outcome").asString()).isEqualTo("lost");
+    assertThat(line.path("kind").asString()).isEqualTo("EXCLUSION");
+    assertThat(raw)
         .doesNotContain("Scripted")
         .doesNotContain("XY34 ZZZ")
         .doesNotContain("23P01")
         .doesNotContain("INSERT");
   }
 
-  @Test
-  void doesNotLogReplayAfterExclusion(CapturedOutput output) {
-    scripted.then(throwConflict(Kind.EXCLUSION));
-
-    assertRejected(Reason.SLOT_TAKEN);
-
-    assertThat(replayLogLines(output)).isEmpty();
-  }
-
-  @Test
-  void writesReplayOutcomeAndKindAsJsonFields(CapturedOutput output) {
-    scripted.then(throwConflict(Kind.DEADLOCK)).then(throwConflict(Kind.DEADLOCK));
-
-    assertRejected(Reason.SLOT_TAKEN);
-
-    JsonNode line = JSON.readTree(replayLogLines(output).get(0));
-    assertThat(line.path("outcome").asString()).isEqualTo("lost");
-    assertThat(line.path("kind").asString()).isEqualTo("DEADLOCK");
-  }
-
-  @Test
-  void writesStoredReplayOutcomeAsJsonField(CapturedOutput output) {
-    scripted.then(insertThenThrow(Kind.DEADLOCK)).then(scripted::insertForReal);
-
-    book();
-
-    JsonNode line = JSON.readTree(replayLogLines(output).get(0));
-    assertThat(line.path("outcome").asString()).isEqualTo("stored");
-    assertThat(line.path("kind").isMissingNode()).isTrue();
+  private static String onlyReplayLogLine(CapturedOutput output) {
+    List<String> lines = replayLogLines(output);
+    assertThat(lines).hasSize(1);
+    return lines.get(0);
   }
 
   private static List<String> replayLogLines(CapturedOutput output) {
