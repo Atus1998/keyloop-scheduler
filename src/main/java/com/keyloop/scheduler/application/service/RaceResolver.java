@@ -10,6 +10,8 @@ import com.keyloop.scheduler.domain.Reason;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Settles a lost race ({@code docs/system-design.md}, section 6, "After a DB error"). The failed
@@ -18,6 +20,8 @@ import java.util.Optional;
  * what was taken.
  */
 final class RaceResolver {
+
+  private static final Logger log = LoggerFactory.getLogger(RaceResolver.class);
 
   private final AvailabilityPort availability;
   private final AppointmentPort appointments;
@@ -47,8 +51,15 @@ final class RaceResolver {
    */
   private Optional<Appointment> replay(Appointment attempted) {
     try {
-      return Optional.of(transactions.inTransaction(() -> appointments.insert(attempted)));
+      Appointment stored = transactions.inTransaction(() -> appointments.insert(attempted));
+      log.atInfo().addKeyValue("outcome", "stored").log("Replay after deadlock: outcome=stored");
+      return Optional.of(stored);
     } catch (ResourceConflictException lostAgain) {
+      // The kind only: the cause holds SQL text and ids.
+      log.atInfo()
+          .addKeyValue("outcome", "lost")
+          .addKeyValue("kind", lostAgain.kind())
+          .log("Replay after deadlock: outcome=lost kind={}", lostAgain.kind());
       return Optional.empty();
     }
   }
