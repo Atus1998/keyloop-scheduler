@@ -1,0 +1,38 @@
+# API and PostgreSQL for local use: docker compose up --build
+# Demo data is loaded (profile demo). Start from an empty database: docker compose down -v
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: scheduler
+      # No passwords. Never add "ports:" to this service. 02-pg_hba.sh narrows trust to the
+      # two app users and the scheduler database; the superuser cannot connect over TCP.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Creates the users and the access rules on first start only (new volume).
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # TCP, not the unix socket: the temporary server that runs the init scripts listens on
+      # the socket only, so this turns healthy once the users exist.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "scheduler_migrator", "-d", "scheduler"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Loopback only: the API, Swagger UI and metrics have no authentication.
+      - "127.0.0.1:8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: demo
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/scheduler
+      SPRING_DATASOURCE_USERNAME: scheduler_app
+      SPRING_FLYWAY_USER: scheduler_migrator
+
+volumes:
+  db-data:

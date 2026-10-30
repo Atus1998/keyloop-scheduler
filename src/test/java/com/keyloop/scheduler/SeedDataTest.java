@@ -14,10 +14,12 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.test.context.ActiveProfiles;
 
-/** Uses the app's own Flyway locations, so the seed is loaded. */
+/** Uses the app's own Flyway locations with the {@code demo} profile, so the seed is loaded. */
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest
+@ActiveProfiles("demo")
 class SeedDataTest {
 
   @Autowired private JdbcTemplate jdbc;
