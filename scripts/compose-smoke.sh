@@ -82,10 +82,18 @@ check "app user cannot create tables" \
 # From another container on the Compose network, over TCP like the API.
 on_network() {
   docker run --rm --network "${PROJECT}_default" postgres:16 \
-    psql -v ON_ERROR_STOP=1 -h db "$@" -c 'SELECT 1' >/dev/null 2>&1
+    psql -v ON_ERROR_STOP=1 -h db "$@" -c 'SELECT 1' 2>&1
 }
-refused() { ! on_network "$@"; }
-check "app user reaches the scheduler database over TCP" on_network -U scheduler_app -d scheduler
+# Refused by pg_hba itself, not by any other failure (network, image pull).
+# psql fails here on purpose, so take its output first: with pipefail a pipe would fail too.
+refused() {
+  local out
+  out=$(on_network "$@" || true)
+  grep -q 'pg_hba.conf rejects connection' <<<"$out"
+}
+check "app user reaches the scheduler database over TCP" \
+  bash -c "docker run --rm --network ${PROJECT}_default postgres:16 \
+    psql -v ON_ERROR_STOP=1 -h db -U scheduler_app -d scheduler -c 'SELECT 1' >/dev/null 2>&1"
 check "superuser is refused over TCP" refused -U postgres -d scheduler
 check "app user is refused on other databases over TCP" refused -U scheduler_app -d postgres
 

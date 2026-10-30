@@ -3,8 +3,9 @@
 # when the data volume is new: after a change here, recreate the volume (docker compose down -v).
 #   scheduler_migrator  owns the database; Flyway migrates with it (DDL, CREATE EXTENSION).
 #   scheduler_app       the API; reads and writes rows, cannot change the schema.
-# Passwords are optional. Docker Compose uses trust auth on its private network and publishes no
-# database port; anywhere else, set SCHEDULER_MIGRATOR_PASSWORD and SCHEDULER_APP_PASSWORD.
+# Passwords are optional. Docker Compose uses no passwords: it publishes no database port, and
+# 02-pg_hba.sh lets only these two users reach this database. Anywhere else, set
+# SCHEDULER_MIGRATOR_PASSWORD and SCHEDULER_APP_PASSWORD (an empty value removes the password).
 set -euo pipefail
 
 # Passwords are read inside psql (\getenv), so they never appear on a command line.
