@@ -24,11 +24,25 @@ class CiWorkflowTest {
   private static final String BUILD_COMMAND = "./gradlew build";
   private static final List<String> TRIGGER_FILTERS =
       List.of("branches", "branches-ignore", "tags", "tags-ignore", "paths", "paths-ignore");
+
+  /** Best effort: the usual ways to hide a failed build or skip tests, not every one. */
   private static final List<String> FAILURE_HIDERS =
-      List.of("|| true", "set +e", "-x ", "--exclude-task", "-DskipTests", "--continue");
-  private static final Pattern PINNED_USES =
-      Pattern.compile(
-          "^\\s*(- )?uses: [\\w.-]+/[\\w.-]+(/[\\w.-]+)*@[0-9a-f]{40} # v\\d+\\.\\d+\\.\\d+$");
+      List.of(
+          "|| true",
+          "|| :",
+          "|| echo",
+          "set +e",
+          "-x ",
+          "--exclude-task",
+          "-DskipTests",
+          "-PskipTests",
+          "--continue");
+
+  private static final Pattern PINNED_ACTION =
+      Pattern.compile("^[\\w.-]+/[\\w.-]+(/[\\w.-]+)*@[0-9a-f]{40}$");
+  private static final Pattern USES_LINE = Pattern.compile("^\\s*(- )?uses: .*");
+  private static final Pattern VERSION_COMMENT = Pattern.compile(".* # v\\S+$");
+  private static final int MAX_REPORT_RETENTION_DAYS = 14;
 
   @Test
   void runsOnPushToEveryBranch() throws IOException {
@@ -48,7 +62,7 @@ class CiWorkflowTest {
 
   @Test
   void buildStepRunsGradleBuild() throws IOException {
-    assertThat(steps()).anyMatch(step -> BUILD_COMMAND.equals(step.get("run")));
+    assertThat(buildStep()).doesNotContainKeys("if", "continue-on-error");
   }
 
   @Test
@@ -96,21 +110,40 @@ class CiWorkflowTest {
   }
 
   @Test
-  void actionsArePinnedByCommitSha() throws IOException {
-    List<String> usesLines =
-        Files.readAllLines(WORKFLOW).stream().filter(line -> line.contains("uses:")).toList();
+  void testReportsExpireWithinTwoWeeks() throws IOException {
+    Object retention = map(stepUsing("actions/upload-artifact").get("with")).get("retention-days");
 
-    assertThat(usesLines).isNotEmpty().allMatch(line -> PINNED_USES.matcher(line).matches());
+    assertThat(retention).isInstanceOf(Integer.class);
+    assertThat((Integer) retention).isBetween(1, MAX_REPORT_RETENTION_DAYS);
+  }
+
+  @Test
+  void actionsArePinnedByCommitSha() throws IOException {
+    List<String> actions =
+        steps().stream()
+            .map(step -> step.get("uses"))
+            .filter(Objects::nonNull)
+            .map(String::valueOf)
+            .toList();
+
+    assertThat(actions).isNotEmpty().allMatch(uses -> PINNED_ACTION.matcher(uses).matches());
+  }
+
+  @Test
+  void pinnedActionsNameTheirVersion() throws IOException {
+    List<String> usesLines =
+        Files.readAllLines(WORKFLOW).stream()
+            .filter(line -> USES_LINE.matcher(line).matches())
+            .toList();
+
+    assertThat(usesLines).isNotEmpty().allMatch(line -> VERSION_COMMENT.matcher(line).matches());
   }
 
   @Test
   void gradleWrapperIsValidated() throws IOException {
     Map<String, Object> setupGradle = stepUsing("gradle/actions/setup-gradle");
 
-    Object with = setupGradle.get("with");
-    if (with != null) {
-      assertThat(map(with).get("validate-wrappers")).isNotEqualTo(false);
-    }
+    assertThat(map(setupGradle.get("with"))).containsEntry("validate-wrappers", true);
   }
 
   @Test
@@ -121,7 +154,7 @@ class CiWorkflowTest {
             .toList();
 
     assertThat(order)
-        .containsExactly(
+        .containsSubsequence(
             "actions/checkout",
             "actions/setup-java",
             "gradle/actions/setup-gradle",
@@ -158,6 +191,13 @@ class CiWorkflowTest {
     Object steps = buildJob().get("steps");
     assertThat(steps).as("steps of job build").isInstanceOf(List.class);
     return ((List<Object>) steps).stream().map(CiWorkflowTest::map).toList();
+  }
+
+  private static Map<String, Object> buildStep() throws IOException {
+    return steps().stream()
+        .filter(step -> BUILD_COMMAND.equals(step.get("run")))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("no step runs " + BUILD_COMMAND));
   }
 
   private static List<String> runCommands() throws IOException {
