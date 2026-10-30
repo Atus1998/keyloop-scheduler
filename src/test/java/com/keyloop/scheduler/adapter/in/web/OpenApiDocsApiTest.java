@@ -150,6 +150,39 @@ class OpenApiDocsApiTest {
     assertThat(reasonsIn(description)).isEqualTo(reasons);
   }
 
+  @ParameterizedTest(name = "{1} {0} {2}")
+  @MethodSource("reasonsByStatus")
+  void errorResponsesListReasonsAsData(
+      String path, String method, String status, Set<String> reasons) {
+    JsonNode listed =
+        operation(spec(), path, method).path("responses").path(status).path("x-reasons");
+
+    assertThat(listed.isArray()).as("x-reasons is an array").isTrue();
+    List<String> names = new ArrayList<>();
+    listed.forEach(name -> names.add(name.asString()));
+    assertThat(names).containsExactlyInAnyOrderElementsOf(reasons);
+  }
+
+  @Test
+  void specIsOpenApi31() {
+    assertThat(spec().path("openapi").asString()).isEqualTo("3.1.0");
+  }
+
+  /** A link with ?url= or ?configUrl= must not load another spec into the UI on this host. */
+  @Test
+  void swaggerUiTakesNoConfigFromQueryAndHasNoDefaultSpec() {
+    var config = mvc.get().uri("/v3/api-docs/swagger-config").exchange();
+    var initializer = mvc.get().uri("/swagger-ui/swagger-initializer.js").exchange();
+
+    assertThat(config).bodyJson().extractingPath("$.validatorUrl").isEqualTo("");
+    assertThat(initializer).hasStatusOk();
+    assertThat(initializer)
+        .bodyText()
+        .doesNotContain("petstore")
+        // springdoc writes the flag only when on, as queryConfigEnabled: "true".
+        .doesNotContainPattern("queryConfigEnabled\"?\\s*:\\s*\"?true");
+  }
+
   @Test
   void created201DocumentsLocationHeader() {
     JsonNode created = operation(spec(), POST_PATH, "post").path("responses").path("201");

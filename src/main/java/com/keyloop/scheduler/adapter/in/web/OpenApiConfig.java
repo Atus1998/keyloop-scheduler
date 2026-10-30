@@ -22,7 +22,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -102,19 +101,36 @@ class OpenApiConfig {
                 .getResponses()
                 .addApiResponse(
                     code(status),
-                    problem(MEANINGS.get(status) + " Reasons: " + names(statusReasons) + ".")));
+                    problem(
+                        meaning(status)
+                            + " Reasons: "
+                            + String.join(", ", names(statusReasons))
+                            + ".",
+                        names(statusReasons))));
     statusesWithoutReason.forEach(
         status ->
             operation
                 .getResponses()
-                .addApiResponse(code(status), problem(MEANINGS.get(status) + " No reason.")));
+                .addApiResponse(code(status), problem(meaning(status) + " No reason.", List.of())));
   }
 
-  private static ApiResponse problem(String description) {
+  /** What an error status means; fails for a status the table does not know yet. */
+  static String meaning(HttpStatus status) {
+    String meaning = MEANINGS.get(status);
+    if (meaning == null) {
+      throw new IllegalStateException(
+          "No meaning for status " + status.value() + " in OpenApiConfig");
+    }
+    return meaning;
+  }
+
+  /** {@code x-reasons} lists the reason codes as data, for clients that generate code. */
+  private static ApiResponse problem(String description, List<String> reasons) {
     Schema<?> ref = new Schema<>().$ref("#/components/schemas/" + PROBLEM_SCHEMA);
     return new ApiResponse()
         .description(description)
-        .content(new Content().addMediaType(PROBLEM_JSON, new MediaType().schema(ref)));
+        .content(new Content().addMediaType(PROBLEM_JSON, new MediaType().schema(ref)))
+        .extensions(Map.of("x-reasons", reasons));
   }
 
   private static Schema<?> problemSchema() {
@@ -137,7 +153,7 @@ class OpenApiConfig {
     return String.valueOf(status.value());
   }
 
-  private static String names(List<Reason> reasons) {
-    return reasons.stream().map(Enum::name).collect(Collectors.joining(", "));
+  private static List<String> names(List<Reason> reasons) {
+    return reasons.stream().map(Enum::name).toList();
   }
 }
