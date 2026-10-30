@@ -52,11 +52,14 @@ final class RaceResolver {
   private Optional<Appointment> replay(Appointment attempted) {
     try {
       Appointment stored = transactions.inTransaction(() -> appointments.insert(attempted));
-      log.info("Replay after deadlock: outcome=stored");
+      log.atInfo().addKeyValue("outcome", "stored").log("Replay after deadlock: outcome=stored");
       return Optional.of(stored);
     } catch (ResourceConflictException lostAgain) {
       // The kind only: the cause holds SQL text and ids.
-      log.info("Replay after deadlock: outcome=lost kind={}", lostAgain.kind());
+      log.atInfo()
+          .addKeyValue("outcome", "lost")
+          .addKeyValue("kind", lostAgain.kind())
+          .log("Replay after deadlock: outcome=lost kind={}", lostAgain.kind());
       return Optional.empty();
     }
   }

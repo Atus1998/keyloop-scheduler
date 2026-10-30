@@ -3,9 +3,16 @@ package com.keyloop.scheduler.adapter.in.web;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.keyloop.scheduler.testsupport.ParallelRunner;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.ServletException;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -94,6 +101,42 @@ class RequestIdFilterTest {
     assertThat(second.getHeader(RequestIdFilter.HEADER)).isNotEqualTo("first-id");
     UUID.fromString(second.getHeader(RequestIdFilter.HEADER));
     assertThat(MDC.get(RequestIdFilter.MDC_KEY)).isNull();
+  }
+
+  /** All requests are inside the chain at once when each reads its MDC. */
+  @Test
+  void keepsEachParallelRequestsOwnIdInMdc() throws Exception {
+    int parallel = 10;
+    var allInside = new CyclicBarrier(parallel);
+    List<String> sent = new ArrayList<>();
+    List<Callable<String>> calls = new ArrayList<>();
+    for (int i = 0; i < parallel; i++) {
+      String id = "thread-" + i;
+      sent.add(id);
+      calls.add(() -> mdcSeenInChain(id, allInside));
+    }
+
+    List<String> seen = ParallelRunner.runTogether(calls, Duration.ofSeconds(10));
+
+    assertThat(seen).containsExactlyElementsOf(sent);
+  }
+
+  private String mdcSeenInChain(String id, CyclicBarrier allInside) throws Exception {
+    var request = new MockHttpServletRequest("GET", "/appointments/7");
+    request.addHeader(RequestIdFilter.HEADER, id);
+    var seen = new AtomicReference<String>();
+    filter.doFilter(
+        request,
+        new MockHttpServletResponse(),
+        (req, res) -> {
+          try {
+            allInside.await(5, TimeUnit.SECONDS);
+          } catch (Exception e) {
+            throw new IllegalStateException(e);
+          }
+          seen.set(MDC.get(RequestIdFilter.MDC_KEY));
+        });
+    return seen.get();
   }
 
   /** Tomcat forwards an unhandled error to the error page as a second dispatch. */

@@ -35,6 +35,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * A lost race ({@code docs/system-design.md}, section 6, "After a DB error"), made deterministic.
@@ -52,6 +54,8 @@ class BookAppointmentRaceTest {
   private static final Instant START = Instant.parse("2030-10-22T08:00:00Z");
 
   private static final Instant END = Instant.parse("2030-10-22T09:30:00Z");
+
+  private static final JsonMapper JSON = JsonMapper.builder().build();
 
   @Autowired private ReferenceDataPort referenceData;
   @Autowired private AvailabilityPort availability;
@@ -242,6 +246,28 @@ class BookAppointmentRaceTest {
     assertRejected(Reason.SLOT_TAKEN);
 
     assertThat(replayLogLines(output)).isEmpty();
+  }
+
+  @Test
+  void writesReplayOutcomeAndKindAsJsonFields(CapturedOutput output) {
+    scripted.then(throwConflict(Kind.DEADLOCK)).then(throwConflict(Kind.DEADLOCK));
+
+    assertRejected(Reason.SLOT_TAKEN);
+
+    JsonNode line = JSON.readTree(replayLogLines(output).get(0));
+    assertThat(line.path("outcome").asString()).isEqualTo("lost");
+    assertThat(line.path("kind").asString()).isEqualTo("DEADLOCK");
+  }
+
+  @Test
+  void writesStoredReplayOutcomeAsJsonField(CapturedOutput output) {
+    scripted.then(insertThenThrow(Kind.DEADLOCK)).then(scripted::insertForReal);
+
+    book();
+
+    JsonNode line = JSON.readTree(replayLogLines(output).get(0));
+    assertThat(line.path("outcome").asString()).isEqualTo("stored");
+    assertThat(line.path("kind").isMissingNode()).isTrue();
   }
 
   private static List<String> replayLogLines(CapturedOutput output) {
