@@ -29,9 +29,6 @@ For the whole project:
 
 See [system-design.md](system-design.md), section 11. In short: no UI, no authentication, no cancel or reschedule, no live push.
 
-## Open questions
+## Submission
 
-| Question | Impact |
-|---|---|
-| What does Keyloop expect in the submission (README content, deadline, how it is graded)? The original brief is not available. | README and demo scope |
-| How GenAI was used in design (system-design section 10) | Written by the user |
+From the Keyloop brief: a system design document, this repository (README with build, run and test steps and an AI collaboration narrative, plus tests of the core business logic), and a 5 to 10 minute video. Due 2 November 2026.

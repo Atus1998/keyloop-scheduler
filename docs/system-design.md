@@ -1,6 +1,6 @@
 # System Design: Unified Service Scheduler
 
-Keyloop challenge, Scenario A. Backend only. **PROPOSED:** = not decided yet.
+Keyloop challenge, Scenario A. Backend only: a REST API on PostgreSQL. Swagger UI and cURL stand in for the client.
 
 ## 1. Overview
 
@@ -8,7 +8,9 @@ The service books a service appointment for a vehicle at a dealership.
 It picks a qualified technician and a free bay, and checks availability in the same transaction as the insert.
 If two requests want the same technician, bay or vehicle, the first commit wins. The other gets 409.
 
-## 2. Rules
+## 2. Rules and assumptions
+
+The brief leaves many rules open. Each row below is an assumption I made; the code and the tests follow it.
 
 ### Booking checks
 
@@ -41,12 +43,14 @@ If two requests want the same technician, bay or vehicle, the first commit wins.
 | Duration | From `service_type`. No buffer: an appointment can start when the previous one ends. |
 | Opening hours | One open time and one close time per dealership, every day. No closed days, no hours past midnight. Technicians work all opening hours. |
 | Hours check | Local date + `opens_at` / `closes_at` in the dealership zone, turned into UTC instants. Check `start >= open` and `end <= close`. Correct on clock-change days. |
+| Clock-change hour | An `opens_at` or `closes_at` inside a skipped hour moves forward by the gap; one inside a repeated hour uses the earlier offset (java.time rules). Normal opening hours never fall there, so there is no special code. |
+| Rule order | Several 422 rules fail: the first row of the booking checks table wins. For 409, `VEHICLE_BUSY` comes first, then `BUSY` / `NO_TECHNICIAN` / `NO_BAY`. |
 | Concurrency | First commit wins. Exclusion constraints on technician, bay and vehicle, for `CONFIRMED` only. Isolation: READ COMMITTED. |
-| Lost race | 409 with what was taken (section 6, "After a DB error"). The server does not retry the booking. The client sends again and gets another technician or bay. |
-| Retry | Same dealership + vehicle + start + service type, already `CONFIRMED`: 200 with that appointment. |
+| Lost race | 409 with what was taken (section 6, "After a DB error"). The server does not pick another technician or bay; it only replays the same insert once after a deadlock. The client sends again and gets another technician or bay. Why: section 8(c). |
+| Retry | Same dealership + vehicle + start + service type, already `CONFIRMED`: 200 with that appointment, no `Location`. Checked after the ids exist (404 first) and before the booking rules, so a retry still gets 200 when the start has passed. A `CANCELLED` match is not a retry. |
 | Time | Stored in UTC (`Instant`, `timestamptz`). Each dealership has a `ZoneId`. Requests: ISO-8601 with offset. Responses: UTC (`Z`). |
-| Data | 8 tables. All except `appointment` are seed data, loaded by Flyway. Status is `CONFIRMED` or `CANCELLED`. No cancel endpoint in v1. |
-| Security | No authentication (known gap). All input validated. No secrets in the repo. Local Docker Compose: PostgreSQL uses trust auth on the private Compose network and publishes no port, so there is no password. Other environments: DB password from an environment variable. |
+| Data | 8 tables. All except `appointment` are reference data; demo rows are loaded by Flyway only with the `demo` profile (Docker Compose, `bootTestRun`). Status is `CONFIRMED` or `CANCELLED`. No cancel endpoint in v1. |
+| Security | No authentication (known gap). All input validated. No secrets in the repo. Local Docker Compose: PostgreSQL uses trust auth on the private Compose network and publishes no port, so there is no password. Other environments: DB password from an environment variable. Two database users: Flyway migrates as `scheduler_migrator` (owns the database), the API runs as `scheduler_app` (data access only, no schema changes, no access to `flyway_schema_history`). Every API connection has `lock_timeout` 5 s and `statement_timeout` 30 s; a timeout gives 500 (known gap). |
 | Errors | ProblemDetail (RFC 9457) for every error, including 400. The reason code is in a `reason` property. Unknown appointment id: 404 `APPOINTMENT_NOT_FOUND`. Unknown JSON fields are ignored. |
 
 ## 3. Architecture
@@ -165,15 +169,28 @@ erDiagram
 ```sql
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
-ALTER TABLE dealership  ADD CONSTRAINT dealership_hours_valid CHECK (closes_at > opens_at);
-ALTER TABLE appointment ADD CONSTRAINT appointment_time_valid CHECK (end_at > start_at);
+ALTER TABLE dealership   ADD CONSTRAINT dealership_hours_valid CHECK (closes_at > opens_at);
+ALTER TABLE service_type ADD CONSTRAINT service_type_duration_valid CHECK (duration_minutes BETWEEN 1 AND 480);
+ALTER TABLE vehicle      ADD CONSTRAINT vehicle_registration_unique UNIQUE (registration);
+ALTER TABLE appointment  ADD CONSTRAINT appointment_time_valid CHECK (end_at > start_at);
+ALTER TABLE appointment  ADD CONSTRAINT appointment_status_valid CHECK (status IN ('CONFIRMED', 'CANCELLED'));
 
 ALTER TABLE appointment
     ADD CONSTRAINT appointment_technician_no_overlap
     EXCLUDE USING gist (technician_id WITH =, tstzrange(start_at, end_at) WITH &&)
     WHERE (status = 'CONFIRMED');
--- Same for bay_id and vehicle_id.
+-- Same for bay_id (appointment_bay_no_overlap) and vehicle_id (appointment_vehicle_no_overlap).
+
+-- The technician and the bay belong to the appointment's dealership.
+ALTER TABLE appointment
+    ADD CONSTRAINT appointment_technician_dealership_fkey
+    FOREIGN KEY (technician_id, dealership_id) REFERENCES technician (id, dealership_id);
+-- Same for bay_id (appointment_bay_dealership_fkey).
 ```
+
+The database does not check that the technician has the skill. The technician picker does.
+
+Full schema: `src/main/resources/db/migration/V1__schema.sql`.
 
 - `tstzrange` is `[start, end)` by default, so back-to-back bookings do not overlap.
 - `end_at` is stored because a constraint cannot read `service_type` from another table.
@@ -185,8 +202,10 @@ ALTER TABLE appointment
 
 | Endpoint | Success |
 |---|---|
-| `POST /appointments` | 201 + `Location` header, or 200 for a retry |
+| `POST /appointments` | 201 + `Location` header, or 200 for a retry (no `Location`) |
 | `GET /appointments/{id}` | 200 |
+
+The OpenAPI 3.1 spec is at `/v3/api-docs`, and Swagger UI at `/swagger-ui.html`. The spec lists every status code of each path, and for each error status the reasons it can carry. Both have no authentication, so the `prod` profile turns them off (with the Swagger UI webjar).
 
 <table>
 <tr><th>Request</th><th>Response (201, 200, GET)</th></tr>
@@ -342,30 +361,76 @@ The code still checks first, to pick a technician and bay and to return `NO_TECH
 
 Proof test: N parallel requests for one slot. Expect exactly one 201, the rest 409.
 
+### (c) A lost race: 409, not another try on the server
+
+| Option | Weak point |
+|---|---|
+| The server picks another free technician or bay and inserts again | Under load one request can lose several times, so it needs a retry limit and holds its connection longer. Each new try repeats the reads and the race. |
+| **409 with the reason** ✅ | The client must send the request again. Parallel requests all pick the same technician first (fewest bookings, then lowest id), so a loser can get 409 while another technician is free. |
+
+Chosen because two customers asking for the same start at the same dealership is rare, a lost race costs one extra request, and every request stays short.
+If the rate of `TECHNICIAN_TAKEN` / `BAY_TAKEN` grows, the next step is one server-side retry with the next technician and bay.
+
 ## 9. Observability
 
-- `/actuator/health` with a database check.
-- Latency of `POST /appointments` (Micrometer).
-- Structured logs with a request id, no personal data.
+| What | How |
+|---|---|
+| Request id | Every response carries `X-Request-Id`. A caller's value is kept if it matches `[A-Za-z0-9._-]{1,64}` (first header only); anything else is replaced by a new UUID and never logged. The id is set before the request runs, so error responses carry it too. A request Tomcat rejects before the filter chain (malformed request line or header) has no id. |
+| Logs | JSON on the console, ECS format (`logging.structured.format.console=ecs`). Each line written during a request has `requestId`. No request body, headers or customer data. The `Exception` catch-all logs the full cause at ERROR, which can hold SQL text: keep logs access-restricted, with short retention. |
+| Health | `/actuator/health`: 200 `UP` or 503 `DOWN`, with the `db` component. No details (no URL, no database name). |
+| Latency | `http.server.requests`, tags `method=POST`, `uri=/appointments`, `status`, `outcome`. Read it at `/actuator/metrics/http.server.requests`. |
+| Race replays | One INFO line per replay after a deadlock: `outcome=stored`, or `outcome=lost kind=…`. No ids, no SQL. |
+| Tracing | Not built. There is one service and one database, so the request id already ties together every log line of a request. With more services: Micrometer Tracing with OpenTelemetry, and the trace id in the same log field. |
+
+What to watch in production:
+
+| Signal | What it tells |
+|---|---|
+| 5xx rate on `POST /appointments` | A bug, database trouble or a timeout (a timeout gives 500, section 2). |
+| 409 rate by reason | `NO_TECHNICIAN` / `NO_BAY` high: the dealership is short of capacity. `TECHNICIAN_TAKEN` / `SLOT_TAKEN` high: many clients want the same slot. Needs the counter by reason (section 11). |
+| p95 latency of `POST /appointments` | Lock waits or a slow database. |
+| Replay lines with `outcome=lost` | How often races end in a deadlock. |
+| Health `DOWN` | The database cannot be reached. Page someone. |
+
+`/actuator/health` and `/actuator/metrics` are on the API port with no authentication, like the API itself. Restrict them once authentication is added.
 
 ## 10. How I used GenAI in design
 
-TODO.
+I used Claude in chat to question the brief and to critique the plan, and Claude Code to write the documents. The AI proposed; I decided.
+Requirements and design were two checkpoints I approved before any code was written.
 
-## 11. Future work
+| Step | What the AI did | What I did |
+|---|---|---|
+| Find gaps in the brief | Listed rules the brief leaves open: opening hours, time zone, who picks the technician, past dates, buffer time. Gave two options with trade-offs for each. | Wrote my own list of open questions first, then compared. Chose one option per question (section 2). My question "what if the client loses the connection after it confirms?" led to the vehicle constraint and the safe retry rule. |
+| Choose how to stop double booking | Compared a check in code, row locks and exclusion constraints (section 8(a)). | Chose the exclusion constraint, and had it tried on a real PostgreSQL 16 before any code: overlaps rejected, back-to-back bookings allowed, cancelled rows ignored, one winner out of two parallel inserts. |
+| Test the race on a real database | Ran truly simultaneous inserts. | Saw that about 3 in 4 losers get `40P01` (deadlock), not `23P01`. Built the replay and look-again steps (section 6) around that. |
+| Critique the plan | Checked each claim against sources. Found that Spring Boot 3.x lost free support on 2026-06-30, and that parallel requests all pick the same technician. | Moved to Spring Boot 4.1. Kept 409 for a lost race (section 8(c)). |
+| Write the documents | Drafted the requirements, this design, the conventions and the backlog. | Reviewed and approved each one. Wrote the rules the AI must follow while coding (`docs/conventions.md`). |
 
-| Item | Status |
+## 11. Scalability, reliability and future work
+
+### Scalability and reliability
+
+| Concern | How the design handles it | Next step if needed |
+|---|---|---|
+| More API instances | The API keeps no state. The no-double-booking rule lives in PostgreSQL, so any number of instances behind a load balancer stay correct. No distributed lock, no sticky sessions. | — |
+| Many requests for one slot | Correct, but slow: ten requests racing for one slot were measured at up to about 20 s per statement, mostly waiting on each other and on deadlock detection. `lock_timeout` 5 s and `statement_timeout` 30 s cap the wait. | A transaction-level advisory lock per dealership before the insert, so losers queue briefly instead of deadlocking. |
+| Client retries | A repeated booking (same dealership, vehicle, start, service type) returns 200 with the stored appointment, so a client can retry safely after a timeout. | An `Idempotency-Key` header. |
+| Database down or slow | Health turns 503 `DOWN`. A request waits at most 5 s for a connection, then fails instead of hanging. | Client retry with backoff; a read replica for `GET`. |
+| Data growth | Every booking belongs to one dealership (composite foreign keys), so the data can be split by dealership later. | Move past appointments to a history table; split data by dealership. |
+| Changing the code | Hexagonal layers, checked by ArchUnit tests. Schema changes only through new Flyway migrations. The API's database user cannot change the schema. | — |
+
+### Future work
+
+| Item | Why not in v1 |
 |---|---|
-| Live push of availability (WebSocket / SSE) | Decided |
-| `Idempotency-Key` header, to replace the retry rule | Decided |
-| Opening hours per weekday, holidays | Decided |
-| Cancel endpoint | Decided |
-| Authentication and authorization | **PROPOSED** |
-| Rate limiting | **PROPOSED** |
-| List free slots before booking | **PROPOSED** |
-| Reschedule endpoint | **PROPOSED** |
-| Technician shifts and days off | **PROPOSED** |
-| Buffer time between appointments | **PROPOSED** |
-| Manage customers, vehicles and reference data | **PROPOSED** |
-| Booking counter by result (`created`, `retry`, each reason) | Decided |
-| Counter for `40P01` deadlocks | Decided |
+| Authentication and authorization | Out of scope for the challenge. Needed before real use: a customer may book only their own vehicles, on the retry path too. |
+| Cancel and reschedule endpoints | The brief asks only to book. The schema already has `CANCELLED`, and the constraints ignore cancelled rows. |
+| List free slots before booking | The brief asks to check availability at booking time. |
+| Opening hours per weekday, holidays, technician shifts and days off | One opening window per day keeps the rules simple (section 2). |
+| Buffer time between appointments | Not asked for. |
+| Manage customers, vehicles and reference data | Seed data is enough for the demo. |
+| Live push of availability (WebSocket or SSE) | Keeps a calendar screen fresh. It does not replace the check at booking time. |
+| `Idempotency-Key` header | The retry rule covers the common case. |
+| Rate limiting | Belongs at the API gateway. |
+| Booking counter by result and reason; counter for `40P01` | Today only latency per status and the replay log lines exist (section 9). |

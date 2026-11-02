@@ -11,7 +11,6 @@ import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
 
-/** Dependencies point inward: adapter -> application -> domain (docs/thiet-ke.md). */
 class ArchitectureTest {
 
   private static final String DOMAIN = "com.keyloop.scheduler.domain..";

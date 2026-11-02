@@ -38,7 +38,7 @@ com.keyloop.scheduler
 | DB errors | `SqlStates` walks the cause chain to `SQLException#getSQLState()`. It never relies on exception class names. |
 | Time | `Clock` wired in `BeanConfig`. The domain gets `Instant now` as a parameter. |
 | JPA | `open-in-view=false`. Entities stay in the persistence adapter; ports return domain records. |
-| Seed data | Separate Flyway folder `db/seed`. The app loads it; tests do not and insert their own data. |
+| Seed data | Repeatable migration `db/seed/R__seed.sql`, safe to run twice. Loaded only with the `demo` profile (`application-demo.properties`), which Docker Compose and `bootTestRun` turn on. Tests insert their own data. |
 
 ## Risks
 
@@ -50,8 +50,9 @@ com.keyloop.scheduler
 | Boot 4 test changes: no `@MockBean`, no default `TestRestTemplate`, bean overriding off | `@MockitoBean` / `@TestBean`, `RestTestClient`. Copy imports from Boot 4 docs. |
 | Hibernate 7 exception classes vary; `ddl-auto=validate` may reject column types | Check SQLState. Fix mismatches with `columnDefinition`. |
 | Jackson 3 may nest `reason` under `properties` | Use only Boot's mapper. A test asserts `$.reason` at top level. |
-| springdoc 3 lags Boot releases | Pin a version that supports Boot 4.1. Smoke test on `/v3/api-docs`. |
+| springdoc 3 lags Boot releases | Pinned 3.1.1 (built on Boot 4.1.0; runs on 4.1.2). swagger-core brings Jackson 2 next to Jackson 3; only the spec uses it. |
 | Testcontainers 2 renamed artifacts and packages | Use the Boot-managed version and `@ServiceConnection`. |
 | Race tests are slow (`deadlock_timeout` 1 s) and can be flaky | Start-gate latch, assert totals only, `@RepeatedTest(5)`, size the pool. |
 | Hidden dependence on JVM time zone | Run tests with a non-UTC `TZ`. |
-| Compose starts the API before the DB is ready | `pg_isready` healthcheck + `depends_on: service_healthy`. |
+| Compose starts the API before the DB is ready | `pg_isready -h 127.0.0.1` healthcheck (TCP, so not during init scripts) + `depends_on: service_healthy`. |
+| Init script runs only on a new volume | `docker compose down -v` to start again; `scripts/compose-smoke.sh` uses its own project and volume. |
