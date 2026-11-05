@@ -28,8 +28,9 @@ import java.util.OptionalLong;
 /**
  * Books an appointment ({@code docs/system-design.md}, section 6). Reference data and the retry
  * match are read in a read-only transaction. A retry match returns the stored appointment before
- * any booking rule runs. The availability check and the insert share one read-write transaction. A
- * lost race goes to {@link RaceResolver} once that transaction has rolled back.
+ * any booking rule runs. The availability check and the insert share one read-write transaction,
+ * which first waits for the other bookings of the same dealership and local day. A lost race goes
+ * to {@link RaceResolver} once that transaction has rolled back.
  */
 public final class BookAppointmentService implements BookAppointmentUseCase {
 
@@ -113,10 +114,13 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
   private BookingResult reserve(
       BookAppointmentCommand command, Dealership dealership, Instant end) {
     Instant start = command.startTime();
+    DealershipDay day = DealershipDay.containing(start, dealership.zoneId());
+    // First statement of the transaction. Each later read (READ COMMITTED) then sees what the
+    // previous booking of this dealership and day committed. A snapshot isolation level would not.
+    locks.lock(dealership.id(), start.atZone(dealership.zoneId()).toLocalDate());
     if (availability.isVehicleBusy(command.vehicleId(), start, end)) {
       return raceResolver.retryOrReject(slot(command, dealership, end), Reason.VEHICLE_BUSY);
     }
-    DealershipDay day = DealershipDay.containing(start, dealership.zoneId());
     OptionalLong technicianId =
         TechnicianPicker.pick(
             availability.findFreeQualifiedTechnicians(
