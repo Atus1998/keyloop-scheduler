@@ -1,9 +1,11 @@
 package com.keyloop.scheduler.adapter.in.web;
 
 import com.keyloop.scheduler.application.service.AppointmentNotFoundException;
+import com.keyloop.scheduler.application.service.BookingQueueTimeoutException;
 import com.keyloop.scheduler.application.service.BookingRejectedException;
 import com.keyloop.scheduler.application.service.ResourceConflictException;
 import com.keyloop.scheduler.domain.Reason;
+import java.util.OptionalLong;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +39,9 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
   static final String UNREADABLE_BODY_DETAIL =
       "The request body must be a JSON object with fields of the right type.";
 
+  /** Long enough for a busy line of bookings to clear. */
+  private static final String RETRY_AFTER_SECONDS = "1";
+
   private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
   @ExceptionHandler(AppointmentNotFoundException.class)
@@ -51,6 +56,20 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
   ProblemDetail handleBookingRejected(BookingRejectedException e) {
     Reason reason = e.reason();
     return problem(ReasonProblems.status(reason), ReasonProblems.detail(reason, e.id()), reason);
+  }
+
+  /**
+   * The booking waited too long for others of its dealership and day. Logged without the cause: it
+   * holds SQL text.
+   */
+  @ExceptionHandler(BookingQueueTimeoutException.class)
+  ResponseEntity<ProblemDetail> handleBookingQueueTimeout(BookingQueueTimeoutException e) {
+    log.warn("Booking queue wait timed out");
+    Reason reason = Reason.BOOKING_QUEUE_TIMEOUT;
+    HttpStatus status = ReasonProblems.status(reason);
+    return ResponseEntity.status(status)
+        .header(HttpHeaders.RETRY_AFTER, RETRY_AFTER_SECONDS)
+        .body(problem(status, ReasonProblems.detail(reason, OptionalLong.empty()), reason));
   }
 
   @ExceptionHandler(InvalidRequestException.class)

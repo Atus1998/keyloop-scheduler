@@ -53,7 +53,8 @@ class OpenApiConfig {
           HttpStatus.CONFLICT, "The time cannot be booked.",
           HttpStatus.UNPROCESSABLE_CONTENT, "The booking breaks a rule.",
           HttpStatus.UNSUPPORTED_MEDIA_TYPE, "The body is not sent as application/json.",
-          HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred.");
+          HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred.",
+          HttpStatus.SERVICE_UNAVAILABLE, "Too many bookings are in progress. Retry later.");
 
   @Bean
   OpenAPI schedulerOpenApi() {

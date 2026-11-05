@@ -14,6 +14,7 @@ final class SqlStates {
 
   static final String EXCLUSION_VIOLATION = "23P01";
   static final String DEADLOCK_DETECTED = "40P01";
+  static final String LOCK_NOT_AVAILABLE = "55P03";
 
   private SqlStates() {}
 
