@@ -4,6 +4,7 @@ import com.keyloop.scheduler.application.port.in.BookAppointmentUseCase;
 import com.keyloop.scheduler.application.port.in.GetAppointmentUseCase;
 import com.keyloop.scheduler.application.port.out.AppointmentPort;
 import com.keyloop.scheduler.application.port.out.AvailabilityPort;
+import com.keyloop.scheduler.application.port.out.DealershipDayLockPort;
 import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
 import com.keyloop.scheduler.application.port.out.TransactionPort;
 import com.keyloop.scheduler.application.service.BookAppointmentService;
@@ -32,8 +33,9 @@ class BeanConfig {
       AvailabilityPort availability,
       AppointmentPort appointments,
       TransactionPort transactions,
+      DealershipDayLockPort locks,
       Clock clock) {
     return new BookAppointmentService(
-        referenceData, availability, appointments, transactions, clock);
+        referenceData, availability, appointments, transactions, locks, clock);
   }
 }

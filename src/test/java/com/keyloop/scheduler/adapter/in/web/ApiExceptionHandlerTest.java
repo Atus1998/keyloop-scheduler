@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.keyloop.scheduler.application.port.in.GetAppointmentUseCase;
 import com.keyloop.scheduler.application.service.AppointmentNotFoundException;
+import com.keyloop.scheduler.application.service.BookingQueueTimeoutException;
 import com.keyloop.scheduler.application.service.ResourceConflictException;
 import com.keyloop.scheduler.domain.Appointment;
 import com.keyloop.scheduler.domain.AppointmentStatus;
@@ -25,6 +26,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -47,10 +49,12 @@ class ApiExceptionHandlerTest {
 
   @Autowired private MockMvcTester mvc;
   @Autowired private FakeGetAppointment useCase;
+  @Autowired private FakeBookAppointment bookUseCase;
 
   @BeforeEach
   void resetFake() {
     useCase.reset();
+    bookUseCase.reset();
   }
 
   @ParameterizedTest
@@ -190,6 +194,42 @@ class ApiExceptionHandlerTest {
     assertThat(mvc.get().uri("/appointments/7")).hasStatus(HttpStatus.INTERNAL_SERVER_ERROR);
     assertThat(output).contains("WARN").contains("DEADLOCK").doesNotContain(SECRET_SQL);
     assertThat(output).doesNotContain("ERROR");
+  }
+
+  @Test
+  void returns503WithRetryAfterWhenTheBookingQueueTimesOut(CapturedOutput output) {
+    bookUseCase.answer =
+        command -> {
+          throw new BookingQueueTimeoutException(
+              new CannotAcquireLockException(
+                  SECRET_SQL,
+                  new SQLException("canceling statement due to lock timeout", "55P03")));
+        };
+
+    var result =
+        mvc.post()
+            .uri("/appointments")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+                """
+                {"dealershipId": 1, "vehicleId": 2, "serviceTypeId": 3,
+                 "startTime": "2030-10-22T08:00:00Z"}
+                """)
+            .exchange();
+
+    assertThat(result)
+        .hasStatus(HttpStatus.SERVICE_UNAVAILABLE)
+        .hasContentType(MediaType.APPLICATION_PROBLEM_JSON)
+        .hasHeader("Retry-After", "1");
+    assertThat(result).bodyJson().extractingPath("$.reason").isEqualTo("BOOKING_QUEUE_TIMEOUT");
+    assertThat(result)
+        .bodyJson()
+        .extractingPath("$.detail")
+        .isEqualTo(
+            "Too many bookings for this dealership and day are in progress."
+                + " Send the request again.");
+    assertThat(result).bodyText().doesNotContain("INSERT INTO").doesNotContain("55P03");
+    assertThat(output).contains("WARN").doesNotContain(SECRET_SQL).doesNotContain("ERROR");
   }
 
   @Test

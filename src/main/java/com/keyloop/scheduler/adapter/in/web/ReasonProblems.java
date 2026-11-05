@@ -26,6 +26,7 @@ final class ReasonProblems {
           HttpStatus.UNPROCESSABLE_CONTENT;
       case NO_TECHNICIAN, NO_BAY, BUSY, VEHICLE_BUSY, TECHNICIAN_TAKEN, BAY_TAKEN, SLOT_TAKEN ->
           HttpStatus.CONFLICT;
+      case BOOKING_QUEUE_TIMEOUT -> HttpStatus.SERVICE_UNAVAILABLE;
     };
   }
 
@@ -51,6 +52,8 @@ final class ReasonProblems {
           "The technician was booked by another request. Send the request again.";
       case BAY_TAKEN -> "The bay was booked by another request. Send the request again.";
       case SLOT_TAKEN -> "The slot was booked by another request. Send the request again.";
+      case BOOKING_QUEUE_TIMEOUT ->
+          "Too many bookings for this dealership and day are in progress. Send the request again.";
     };
   }
 

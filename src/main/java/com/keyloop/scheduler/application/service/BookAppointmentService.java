@@ -5,6 +5,7 @@ import com.keyloop.scheduler.application.port.in.BookAppointmentUseCase;
 import com.keyloop.scheduler.application.port.in.BookingResult;
 import com.keyloop.scheduler.application.port.out.AppointmentPort;
 import com.keyloop.scheduler.application.port.out.AvailabilityPort;
+import com.keyloop.scheduler.application.port.out.DealershipDayLockPort;
 import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
 import com.keyloop.scheduler.application.port.out.TransactionPort;
 import com.keyloop.scheduler.domain.Appointment;
@@ -36,6 +37,7 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
   private final AvailabilityPort availability;
   private final AppointmentPort appointments;
   private final TransactionPort transactions;
+  private final DealershipDayLockPort locks;
   private final Clock clock;
   private final RaceResolver raceResolver;
 
@@ -44,11 +46,13 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
       AvailabilityPort availability,
       AppointmentPort appointments,
       TransactionPort transactions,
+      DealershipDayLockPort locks,
       Clock clock) {
     this.referenceData = Objects.requireNonNull(referenceData, "referenceData");
     this.availability = Objects.requireNonNull(availability, "availability");
     this.appointments = Objects.requireNonNull(appointments, "appointments");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
+    this.locks = Objects.requireNonNull(locks, "locks");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.raceResolver = new RaceResolver(availability, appointments, transactions);
   }

@@ -8,6 +8,7 @@ import com.keyloop.scheduler.application.port.in.BookAppointmentCommand;
 import com.keyloop.scheduler.application.port.in.BookingResult;
 import com.keyloop.scheduler.application.port.out.AppointmentPort;
 import com.keyloop.scheduler.application.port.out.AvailabilityPort;
+import com.keyloop.scheduler.application.port.out.DealershipDayLockPort;
 import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
 import com.keyloop.scheduler.application.port.out.TransactionPort;
 import com.keyloop.scheduler.application.service.ResourceConflictException.Kind;
@@ -61,6 +62,7 @@ class BookAppointmentRaceTest {
   @Autowired private AvailabilityPort availability;
   @Autowired private AppointmentPort appointments;
   @Autowired private TransactionPort transactions;
+  @Autowired private DealershipDayLockPort locks;
   @Autowired private JdbcTemplate jdbc;
 
   private PersistenceFixtures fixtures;
@@ -242,7 +244,12 @@ class BookAppointmentRaceTest {
 
   private BookingResult book() {
     return new BookAppointmentService(
-            referenceData, counting, scripted, transactions, Clock.fixed(NOW, ZoneOffset.UTC))
+            referenceData,
+            counting,
+            scripted,
+            transactions,
+            locks,
+            Clock.fixed(NOW, ZoneOffset.UTC))
         .book(new BookAppointmentCommand(dealershipId, vehicleId, serviceTypeId, START));
   }
 
