@@ -2,29 +2,38 @@ package com.keyloop.scheduler.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.keyloop.scheduler.PostgresIntegrationTest;
 import com.keyloop.scheduler.application.port.in.BookAppointmentCommand;
 import com.keyloop.scheduler.application.port.in.BookingResult;
 import com.keyloop.scheduler.application.port.out.AppointmentPort;
 import com.keyloop.scheduler.application.port.out.AvailabilityPort;
+import com.keyloop.scheduler.application.port.out.DealershipDayLockPort;
 import com.keyloop.scheduler.application.port.out.ReferenceDataPort;
 import com.keyloop.scheduler.application.port.out.TransactionPort;
 import com.keyloop.scheduler.domain.Appointment;
 import com.keyloop.scheduler.domain.AppointmentStatus;
 import com.keyloop.scheduler.domain.Dealership;
+import com.keyloop.scheduler.domain.DealershipDay;
 import com.keyloop.scheduler.domain.Reason;
 import com.keyloop.scheduler.domain.ServiceType;
 import com.keyloop.scheduler.domain.Technician;
+import com.keyloop.scheduler.domain.TechnicianCandidate;
 import com.keyloop.scheduler.domain.Vehicle;
 import com.keyloop.scheduler.testsupport.PersistenceFixtures;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -41,6 +50,7 @@ class BookAppointmentServiceTest {
   @Autowired private AvailabilityPort availability;
   @Autowired private AppointmentPort appointments;
   @Autowired private TransactionPort transactions;
+  @Autowired private DealershipDayLockPort locks;
   @Autowired private JdbcTemplate jdbc;
 
   private PersistenceFixtures fixtures;
@@ -354,6 +364,7 @@ class BookAppointmentServiceTest {
                 availability,
                 appointments,
                 transactions,
+                locks,
                 Clock.fixed(NOW, ZoneOffset.UTC))
             .book(command(START));
 
@@ -361,9 +372,78 @@ class BookAppointmentServiceTest {
     assertThat(counting.qualifiedTechnicianReads).isZero();
   }
 
+  @ParameterizedTest
+  @CsvSource({
+    // 09:00 BST on Tuesday 22 October 2030.
+    "Europe/London, 2030-10-22T08:00:00Z, 2030-10-22",
+    // 09:00 NZDT on Wednesday 23 October 2030, still the 22nd in UTC.
+    "Pacific/Auckland, 2030-10-22T20:00:00Z, 2030-10-23"
+  })
+  void locksDealershipAndLocalDayOnceBeforeReadingAvailability(
+      String zone, String start, String localDay) {
+    long dealership = fixtures.insertDealership(zone, "09:00", "18:00");
+    long technicianId = fixtures.insertTechnician(dealership, "Only");
+    fixtures.insertSkill(technicianId, serviceTypeId);
+    fixtures.insertBay(dealership);
+    List<String> events = new ArrayList<>();
+
+    BookingResult result =
+        recordingService(events)
+            .book(
+                new BookAppointmentCommand(
+                    dealership, vehicleId, serviceTypeId, Instant.parse(start)));
+
+    assertThat(result.created()).isTrue();
+    assertThat(events).as("events").first().isEqualTo("lock " + dealership + " " + localDay);
+    assertThat(events).as("events").filteredOn(e -> e.startsWith("lock")).hasSize(1);
+    assertThat(events).as("events").contains("isVehicleBusy");
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"unknown dealership", "start in past", "retry"})
+  void doesNotLockWhenTheAnswerComesBeforeReserving(String outcome) {
+    skilledTechnician("Only");
+    if (outcome.equals("retry")) {
+      service(NOW).book(command(START));
+    }
+    BookAppointmentCommand request =
+        switch (outcome) {
+          case "unknown dealership" ->
+              new BookAppointmentCommand(dealershipId + 999, vehicleId, serviceTypeId, START);
+          case "start in past" -> command(Instant.parse("2030-10-20T09:00:00Z"));
+          default -> command(START);
+        };
+    List<String> events = new ArrayList<>();
+
+    Throwable thrown = catchThrowable(() -> recordingService(events).book(request));
+
+    if (outcome.equals("retry")) {
+      assertThat(thrown).isNull();
+    } else {
+      assertThat(thrown).isInstanceOf(BookingRejectedException.class);
+    }
+    assertThat(events).as("events").noneMatch(e -> e.startsWith("lock"));
+  }
+
   private BookAppointmentService service(Instant now) {
     return new BookAppointmentService(
-        referenceData, availability, appointments, transactions, Clock.fixed(now, ZoneOffset.UTC));
+        referenceData,
+        availability,
+        appointments,
+        transactions,
+        locks,
+        Clock.fixed(now, ZoneOffset.UTC));
+  }
+
+  /** Like {@link #service}, but records each lock and each availability read in {@code events}. */
+  private BookAppointmentService recordingService(List<String> events) {
+    return new BookAppointmentService(
+        referenceData,
+        new RecordingAvailability(availability, events),
+        appointments,
+        transactions,
+        new RecordingLock(locks, events),
+        Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   private BookAppointmentCommand command(Instant start) {
@@ -422,6 +502,53 @@ class BookAppointmentServiceTest {
     public List<Technician> findQualifiedTechnicians(long dealershipId, long serviceTypeId) {
       qualifiedTechnicianReads++;
       return delegate.findQualifiedTechnicians(dealershipId, serviceTypeId);
+    }
+  }
+
+  /** Delegates to the real lock and records each call as {@code "lock <dealership> <day>"}. */
+  private record RecordingLock(DealershipDayLockPort delegate, List<String> events)
+      implements DealershipDayLockPort {
+
+    @Override
+    public void lock(long dealershipId, LocalDate day) {
+      events.add("lock " + dealershipId + " " + day);
+      delegate.lock(dealershipId, day);
+    }
+  }
+
+  /** Delegates to the real port and records the name of each read. */
+  private record RecordingAvailability(AvailabilityPort delegate, List<String> events)
+      implements AvailabilityPort {
+
+    @Override
+    public boolean isVehicleBusy(long vehicleId, Instant start, Instant end) {
+      events.add("isVehicleBusy");
+      return delegate.isVehicleBusy(vehicleId, start, end);
+    }
+
+    @Override
+    public boolean isTechnicianBusy(long technicianId, Instant start, Instant end) {
+      events.add("isTechnicianBusy");
+      return delegate.isTechnicianBusy(technicianId, start, end);
+    }
+
+    @Override
+    public boolean isBayBusy(long bayId, Instant start, Instant end) {
+      events.add("isBayBusy");
+      return delegate.isBayBusy(bayId, start, end);
+    }
+
+    @Override
+    public List<TechnicianCandidate> findFreeQualifiedTechnicians(
+        long dealershipId, long serviceTypeId, Instant start, Instant end, DealershipDay day) {
+      events.add("findFreeQualifiedTechnicians");
+      return delegate.findFreeQualifiedTechnicians(dealershipId, serviceTypeId, start, end, day);
+    }
+
+    @Override
+    public List<Long> findFreeBayIds(long dealershipId, Instant start, Instant end) {
+      events.add("findFreeBayIds");
+      return delegate.findFreeBayIds(dealershipId, start, end);
     }
   }
 }

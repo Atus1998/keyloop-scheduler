@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.keyloop.scheduler.application.service.ResourceConflictException;
 import java.sql.SQLException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -36,9 +38,11 @@ class AppointmentAdapterTranslationTest {
         .hasCause(error);
   }
 
-  @Test
-  void rethrowsOtherStates() {
-    var error = new DataIntegrityViolationException("x", new SQLException("check", "23514"));
+  /** 55P03 from an insert is not the booking queue: only the lock adapter maps it to 503. */
+  @ParameterizedTest
+  @ValueSource(strings = {"23514", "55P03"})
+  void rethrowsOtherStates(String state) {
+    var error = new DataIntegrityViolationException("x", new SQLException("other", state));
 
     assertThat(AppointmentAdapter.translate(error)).isSameAs(error);
   }
