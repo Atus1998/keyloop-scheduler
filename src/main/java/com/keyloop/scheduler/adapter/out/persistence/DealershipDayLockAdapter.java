@@ -7,6 +7,7 @@ import java.util.Objects;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Takes a PostgreSQL transaction-level advisory lock through {@code lock_booking_day} (migration
@@ -31,6 +32,10 @@ class DealershipDayLockAdapter implements DealershipDayLockPort {
 
   @Override
   public void lock(long dealershipId, LocalDate day) {
+    // Outside a transaction the lock would end with its own statement and queue nothing.
+    if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+      throw new IllegalStateException("The dealership-day lock needs an open transaction");
+    }
     long key = lockKey(dealershipId, day);
     try {
       jdbc.query("SELECT lock_booking_day(?)", IGNORE_RESULT, key);

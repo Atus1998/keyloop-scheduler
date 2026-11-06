@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.zone.ZoneOffsetTransition;
@@ -77,5 +78,18 @@ class DealershipDayTest {
 
     assertThatThrownBy(() -> new DealershipDay(instant, instant))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void dateOfIsTheLocalDateOfTheDayThatHoldsTheInstant() {
+    ZoneId auckland = ZoneId.of("Pacific/Auckland");
+    // 09:00 NZDT on 23 October 2030 is still the 22nd in UTC.
+    Instant instant = Instant.parse("2030-10-22T20:00:00Z");
+
+    LocalDate date = DealershipDay.dateOf(instant, auckland);
+
+    assertThat(date).isEqualTo(LocalDate.of(2030, 10, 23));
+    assertThat(DealershipDay.containing(instant, auckland).start())
+        .isEqualTo(date.atStartOfDay(auckland).toInstant());
   }
 }
