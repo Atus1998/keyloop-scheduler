@@ -22,9 +22,11 @@ com.keyloop.scheduler
 ├── domain                 records + BookingRules, TechnicianPicker, BayPicker, Reason (enum)
 ├── application            no Spring annotations
 │   ├── port/in            BookAppointmentUseCase, GetAppointmentUseCase
-│   ├── port/out           ReferenceDataPort, AppointmentPort, AvailabilityPort, TransactionPort
+│   ├── port/out           ReferenceDataPort, AppointmentPort, AvailabilityPort, TransactionPort,
+│   │                      DealershipDayLockPort
 │   └── service            BookAppointmentService, GetAppointmentService, RaceResolver, BookingOutcome,
-│                          BookingRejectedException, ResourceConflictException (EXCLUSION | DEADLOCK)
+│                          BookingRejectedException, ResourceConflictException (EXCLUSION | DEADLOCK),
+│                          BookingQueueTimeoutException
 ├── adapter
 │   ├── in/web             AppointmentController, request/response records, ApiExceptionHandler, RequestIdFilter
 │   └── out/persistence    entities, Spring Data repos, *Adapter classes, SpringTransactionAdapter, SqlStates
@@ -52,7 +54,7 @@ com.keyloop.scheduler
 | Jackson 3 may nest `reason` under `properties` | Use only Boot's mapper. A test asserts `$.reason` at top level. |
 | springdoc 3 lags Boot releases | Pinned 3.1.1 (built on Boot 4.1.0; runs on 4.1.2). swagger-core brings Jackson 2 next to Jackson 3; only the spec uses it. |
 | Testcontainers 2 renamed artifacts and packages | Use the Boot-managed version and `@ServiceConnection`. |
-| Race tests are slow (`deadlock_timeout` 1 s) and can be flaky | Start-gate latch, assert totals only, `@RepeatedTest(5)`, size the pool. |
+| Race tests can be flaky | Start-gate latch, a warm-up request, assert totals only, repeat 5 times, size the pool. Bookings queue per dealership and day, so a round takes tens of ms; `deadlock_timeout` (1 s) only matters when lines race, such as one vehicle at two dealerships. |
 | Hidden dependence on JVM time zone | Run tests with a non-UTC `TZ`. |
 | Compose starts the API before the DB is ready | `pg_isready -h 127.0.0.1` healthcheck (TCP, so not during init scripts) + `depends_on: service_healthy`. |
 | Init script runs only on a new volume | `docker compose down -v` to start again; `scripts/compose-smoke.sh` uses its own project and volume. |
