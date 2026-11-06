@@ -13,7 +13,7 @@ Rules and status codes live in [system-design.md](system-design.md), section 2. 
 |---|---|---|
 | 1 | Book an appointment | When a valid request arrives and a qualified technician and a bay are free, then the API returns 201 with the chosen technician and bay, and a `Location` header. |
 | 2 | Reject bad bookings | When a request breaks a rule in system-design section 2, then the API returns that status and reason as a ProblemDetail. |
-| 3 | No double booking | When N requests ask for the same slot at the same time, then exactly one gets 201 and the others get 409 with a reason. |
+| 3 | No double booking | When N requests ask for the same start at the same dealership at the same time, then no technician, bay or vehicle is ever double booked, as many requests as there are free slots (at most N) get 201, and the others get 409 with a reason, or 503 if their wait in line goes over 2 s. |
 | 4 | Safe retry | When the same booking is sent again (same dealership, vehicle, start, service type), then the API returns 200 with the existing appointment, also while the first request is still running. |
 | 5 | Read an appointment | When `GET /appointments/{id}` is called with a known id, then it returns 200 with the appointment. Unknown id: 404. |
 

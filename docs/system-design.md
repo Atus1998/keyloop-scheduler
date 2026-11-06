@@ -6,7 +6,8 @@ Keyloop challenge, Scenario A. Backend only: a REST API on PostgreSQL. Swagger U
 
 The service books a service appointment for a vehicle at a dealership.
 It picks a qualified technician and a free bay, and checks availability in the same transaction as the insert.
-If two requests want the same technician, bay or vehicle, the first commit wins. The other gets 409.
+Bookings for one dealership and local day wait in line, so parallel requests share out every free technician and bay.
+The database constraints stay as the last guard: if two requests still want the same technician, bay or vehicle, the first commit wins and the other gets 409.
 
 ## 2. Rules and assumptions
 
@@ -27,6 +28,7 @@ The brief leaves many rules open. Each row below is an assumption I made; the co
 | A bay is free | 409 `NO_BAY` |
 | Both of the two rows above | 409 `BUSY` if both fail |
 | The vehicle has no overlapping booking | 409 `VEHICLE_BUSY` |
+| The wait for other bookings of the same dealership and day is at most 2 s | 503 `BOOKING_QUEUE_TIMEOUT`, `Retry-After: 1` |
 
 ### How the system picks
 
@@ -45,12 +47,12 @@ The brief leaves many rules open. Each row below is an assumption I made; the co
 | Hours check | Local date + `opens_at` / `closes_at` in the dealership zone, turned into UTC instants. Check `start >= open` and `end <= close`. Correct on clock-change days. |
 | Clock-change hour | An `opens_at` or `closes_at` inside a skipped hour moves forward by the gap; one inside a repeated hour uses the earlier offset (java.time rules). Normal opening hours never fall there, so there is no special code. |
 | Rule order | Several 422 rules fail: the first row of the booking checks table wins. For 409, `VEHICLE_BUSY` comes first, then `BUSY` / `NO_TECHNICIAN` / `NO_BAY`. |
-| Concurrency | First commit wins. Exclusion constraints on technician, bay and vehicle, for `CONFIRMED` only. Isolation: READ COMMITTED. |
-| Lost race | 409 with what was taken (section 6, "After a DB error"). The server does not pick another technician or bay; it only replays the same insert once after a deadlock. The client sends again and gets another technician or bay. Why: section 8(c). |
+| Concurrency | Bookings of one dealership and local day run one at a time: the first statement of the booking transaction takes a transaction-level advisory lock (`lock_booking_day`, migration V2) for that dealership and day, and waits at most 2 s for it. Then the exclusion constraints on technician, bay and vehicle (`CONFIRMED` only): first commit wins. Isolation: READ COMMITTED, which the line depends on: each read sees what the previous booking committed. |
+| Lost race | Rare: only requests in different lines, such as one vehicle at two dealerships, can still race. 409 with what was taken (section 6, "After a DB error"). The server does not pick another technician or bay; it only replays the same insert once after a deadlock. The client sends again and gets another technician or bay. Why: section 8(c). |
 | Retry | Same dealership + vehicle + start + service type, already `CONFIRMED`: 200 with that appointment, no `Location`. Checked after the ids exist (404 first) and before the booking rules, so a retry still gets 200 when the start has passed. A `CANCELLED` match is not a retry. |
 | Time | Stored in UTC (`Instant`, `timestamptz`). Each dealership has a `ZoneId`. Requests: ISO-8601 with offset. Responses: UTC (`Z`). |
 | Data | 8 tables. All except `appointment` are reference data; demo rows are loaded by Flyway only with the `demo` profile (Docker Compose, `bootTestRun`). Status is `CONFIRMED` or `CANCELLED`. No cancel endpoint in v1. |
-| Security | No authentication (known gap). All input validated. No secrets in the repo. Local Docker Compose: PostgreSQL uses trust auth on the private Compose network and publishes no port, so there is no password. Other environments: DB password from an environment variable. Two database users: Flyway migrates as `scheduler_migrator` (owns the database), the API runs as `scheduler_app` (data access only, no schema changes, no access to `flyway_schema_history`). Every API connection has `lock_timeout` 5 s and `statement_timeout` 30 s; a timeout gives 500 (known gap). |
+| Security | No authentication (known gap). All input validated. No secrets in the repo. Local Docker Compose: PostgreSQL uses trust auth on the private Compose network and publishes no port, so there is no password. Other environments: DB password from an environment variable. Two database users: Flyway migrates as `scheduler_migrator` (owns the database), the API runs as `scheduler_app` (data access only, no schema changes, no access to `flyway_schema_history`). Every API connection has `lock_timeout` 5 s and `statement_timeout` 30 s; a timeout gives 500 (known gap). Only the wait in the booking line has its own 2 s limit and gives 503. |
 | Errors | ProblemDetail (RFC 9457) for every error, including 400. The reason code is in a `reason` property. Unknown appointment id: 404 `APPOINTMENT_NOT_FOUND`. Unknown JSON fields are ignored. |
 
 ## 3. Architecture
@@ -94,7 +96,7 @@ flowchart LR
 | Use cases (`port/in`) | `BookAppointmentUseCase`, `GetAppointmentUseCase`. What the web adapter may call. |
 | Application services | Run the flow in section 6. Each step runs in its own transaction through `TransactionPort`. No Spring annotations. |
 | Domain | Booking rules and technician choice. No Spring or database code. |
-| Ports (`port/out`) | `ReferenceDataPort`, `AppointmentPort`, `AvailabilityPort`, `TransactionPort`. What the application needs from outside. |
+| Ports (`port/out`) | `ReferenceDataPort`, `AppointmentPort`, `AvailabilityPort`, `TransactionPort`, `DealershipDayLockPort`. What the application needs from outside. |
 | Persistence adapter | Spring Data JPA, native SQL for free technicians and bays, `saveAndFlush`, `TransactionTemplate`. Turns `23P01` / `40P01` into an application exception. |
 | Config | Wires services to ports with `@Bean`. Provides the `Clock`. |
 | PostgreSQL 16 | Data. Exclusion constraints are the last guard against double booking. |
@@ -190,7 +192,7 @@ ALTER TABLE appointment
 
 The database does not check that the technician has the skill. The technician picker does.
 
-Full schema: `src/main/resources/db/migration/V1__schema.sql`.
+Full schema: `src/main/resources/db/migration/V1__schema.sql`. `V2__booking_day_lock.sql` adds the `lock_booking_day` function (section 8(c)).
 
 - `tstzrange` is `[start, end)` by default, so back-to-back bookings do not overlap.
 - `end_at` is stored because a constraint cannot read `service_type` from another table.
@@ -263,7 +265,9 @@ flowchart TD
     retry -->|yes| ok200["200 existing appointment"]
     retry -->|no| rules{"Booking rules OK?"}
     rules -->|no| e422["422"]
-    rules -->|yes| free{"Free technician<br/>and bay?"}
+    rules -->|yes| line{"Turn in the line for<br/>dealership + day within 2 s?"}
+    line -->|no| e503["503 BOOKING_QUEUE_TIMEOUT"]
+    line -->|yes| free{"Free technician<br/>and bay?"}
     free -->|no| e409a["409 NO_TECHNICIAN /<br/>NO_BAY / BUSY"]
     free -->|yes| insert["INSERT + flush"]
     insert -->|ok| ok201["COMMIT, 201"]
@@ -287,20 +291,19 @@ sequenceDiagram
 
     A->>API: POST, slot S
     B->>API: POST, slot S
-    Note over API: Both pass all checks and pick technician T1
-    API->>DB: A: INSERT (T1), flush
-    API->>DB: B: INSERT (T1), flush
-    Note over DB: B waits for A
-    API->>DB: A: COMMIT
-    API-->>A: 201 Created
-    DB-->>API: B: 23P01 or 40P01
-    API->>DB: B: ROLLBACK
-    API->>DB: B: new transaction, look again
-    DB-->>API: T1 is taken
-    API-->>B: 409 TECHNICIAN_TAKEN
+    API->>DB: A: lock dealership + day
+    API->>DB: B: lock dealership + day
+    Note over DB: B waits for A (at most 2 s)
+    API->>DB: A: read free, pick T1, INSERT, COMMIT
+    API-->>A: 201 Created (T1)
+    Note over DB: A's commit releases the lock
+    API->>DB: B: read free (T1 is taken), pick T2, INSERT, COMMIT
+    API-->>B: 201 Created (T2)
 ```
 
 ### After a DB error
+
+The line makes these errors rare: requests of the same dealership and day no longer race. They remain possible between lines, for example one vehicle booked at two dealerships at once.
 
 On `23P01` (exclusion_violation) or `40P01` (deadlock_detected), the transaction is rolled back.
 
@@ -359,17 +362,21 @@ The code still checks first, to pick a technician and bay and to return `NO_TECH
 | H2 | No `EXCLUDE`, no range types, no `btree_gist`. Migrations fail. The core rule cannot be tested. |
 | **Testcontainers** ✅ | Needs Docker. Slower start. GitHub Actions Linux runners have Docker. |
 
-Proof test: N parallel requests for one slot. Expect exactly one 201, the rest 409.
+Proof test: N parallel requests for one slot. Expect as many 201s as free technician-and-bay pairs, the rest 409 with the real reason.
 
-### (c) A lost race: 409, not another try on the server
+### (c) Parallel requests: a queue per dealership and day
 
 | Option | Weak point |
 |---|---|
-| The server picks another free technician or bay and inserts again | Under load one request can lose several times, so it needs a retry limit and holds its connection longer. Each new try repeats the reads and the race. |
-| **409 with the reason** ✅ | The client must send the request again. Parallel requests all pick the same technician first (fewest bookings, then lowest id), so a loser can get 409 while another technician is free. |
+| 409 with the reason, client sends again (v1) | Parallel requests all pick the same technician first (fewest bookings, then lowest id), so losers get 409 while another technician is free, and the third of three clients sends three times. Losers often deadlock, and ten racing requests took up to about 20 s. |
+| The server picks another free technician or bay and inserts again | Under load one request can lose several times, so it needs a retry limit. Each new try repeats the reads and the race, and adds load when the slot is full anyway. |
+| **Advisory lock per dealership and local day** ✅ | Bookings of one dealership and day cannot run in parallel. A waiting request holds a database connection (section 11). |
+| Distributed lock in Redis | A new service to run. The lock lives outside the transaction, so releasing it after the commit is up to the code, and an expired lease lets two holders in. |
+| Message queue (Kafka, RabbitMQ) | A new service to run, and the API turns asynchronous (202, then poll or webhook), so every client changes. |
 
-Chosen because two customers asking for the same start at the same dealership is rare, a lost race costs one extra request, and every request stays short.
-If the rate of `TECHNICIAN_TAKEN` / `BAY_TAKEN` grows, the next step is one server-side retry with the next technician and bay.
+Chosen because it needs no new infrastructure and its lifetime is exactly the transaction's: PostgreSQL makes the commit visible before it releases the lock, so the next booking in line always reads the latest state.
+Ten parallel requests for one slot now finish in about 20 to 45 ms in tests, and each gets a free technician and bay while there is one.
+The wait is limited to 2 s by `SET lock_timeout` on the `lock_booking_day` function; PostgreSQL restores the connection's 5 s when the function returns.
 
 ## 9. Observability
 
@@ -389,7 +396,8 @@ What to watch in production:
 | 5xx rate on `POST /appointments` | A bug, database trouble or a timeout (a timeout gives 500, section 2). |
 | 409 rate by reason | `NO_TECHNICIAN` / `NO_BAY` high: the dealership is short of capacity. `TECHNICIAN_TAKEN` / `SLOT_TAKEN` high: many clients want the same slot. Needs the counter by reason (section 11). |
 | p95 latency of `POST /appointments` | Lock waits or a slow database. |
-| Replay lines with `outcome=lost` | How often races end in a deadlock. |
+| Replay lines with `outcome=lost` | How often races end in a deadlock. Expected near zero now that bookings queue. |
+| 503 rate on `POST /appointments` | `BOOKING_QUEUE_TIMEOUT`: one dealership and day gets more bookings at once than the line clears in 2 s. |
 | Health `DOWN` | The database cannot be reached. Page someone. |
 
 `/actuator/health` and `/actuator/metrics` are on the API port with no authentication, like the API itself. Restrict them once authentication is added.
@@ -404,7 +412,7 @@ Requirements and design were two checkpoints I approved before any code was writ
 | Find gaps in the brief | Listed rules the brief leaves open: opening hours, time zone, who picks the technician, past dates, buffer time. Gave two options with trade-offs for each. | Wrote my own list of open questions first, then compared. Chose one option per question (section 2). My question "what if the client loses the connection after it confirms?" led to the vehicle constraint and the safe retry rule. |
 | Choose how to stop double booking | Compared a check in code, row locks and exclusion constraints (section 8(a)). | Chose the exclusion constraint, and had it tried on a real PostgreSQL 16 before any code: overlaps rejected, back-to-back bookings allowed, cancelled rows ignored, one winner out of two parallel inserts. |
 | Test the race on a real database | Ran truly simultaneous inserts. | Saw that about 3 in 4 losers get `40P01` (deadlock), not `23P01`. Built the replay and look-again steps (section 6) around that. |
-| Critique the plan | Checked each claim against sources. Found that Spring Boot 3.x lost free support on 2026-06-30, and that parallel requests all pick the same technician. | Moved to Spring Boot 4.1. Kept 409 for a lost race (section 8(c)). |
+| Critique the plan | Checked each claim against sources. Found that Spring Boot 3.x lost free support on 2026-06-30, and that parallel requests all pick the same technician. | Moved to Spring Boot 4.1. Kept 409 for a lost race at first, then replaced it with a queue per dealership and day (section 8(c)). |
 | Write the documents | Drafted the requirements, this design, the conventions and the backlog. | Reviewed and approved each one. Wrote the rules the AI must follow while coding (`docs/conventions.md`). |
 
 ## 11. Scalability, reliability and future work
@@ -414,7 +422,7 @@ Requirements and design were two checkpoints I approved before any code was writ
 | Concern | How the design handles it | Next step if needed |
 |---|---|---|
 | More API instances | The API keeps no state. The no-double-booking rule lives in PostgreSQL, so any number of instances behind a load balancer stay correct. No distributed lock, no sticky sessions. | — |
-| Many requests for one slot | Correct, but slow: ten requests racing for one slot were measured at up to about 20 s per statement, mostly waiting on each other and on deadlock detection. `lock_timeout` 5 s and `statement_timeout` 30 s cap the wait. | A transaction-level advisory lock per dealership before the insert, so losers queue briefly instead of deadlocking. |
+| Many requests for one slot | Bookings of one dealership and day queue on an advisory lock (section 8(c)). Ten parallel requests finish in about 20 to 45 ms in tests. A wait over 2 s gives 503. Known limit: a waiting request holds a pool connection (10 by default), so a burst of more than 10 at one dealership and day can leave other dealerships waiting up to 5 s for a connection and then getting 500. | Limit the waiting requests per dealership and day inside the API, before they take a connection, and answer 503 at once. |
 | Client retries | A repeated booking (same dealership, vehicle, start, service type) returns 200 with the stored appointment, so a client can retry safely after a timeout. | An `Idempotency-Key` header. |
 | Database down or slow | Health turns 503 `DOWN`. A request waits at most 5 s for a connection, then fails instead of hanging. | Client retry with backoff; a read replica for `GET`. |
 | Data growth | Every booking belongs to one dealership (composite foreign keys), so the data can be split by dealership later. | Move past appointments to a history table; split data by dealership. |

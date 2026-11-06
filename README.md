@@ -82,7 +82,7 @@ The brief leaves many rules open. My choices are in [section 2 of the design](do
 
 - No authentication.
 - One opening window per day for every dealership: no holidays, no shifts.
-- A request that loses a race for the same slot gets 409 and must be sent again ([why](docs/system-design.md#c-a-lost-race-409-not-another-try-on-the-server)).
+- Bookings for one dealership and day wait in line. A wait over 2 s gives 503 and must be sent again ([why](docs/system-design.md#c-parallel-requests-a-queue-per-dealership-and-day)).
 - A database timeout gives 500.
 
 ## AI collaboration narrative
@@ -113,7 +113,7 @@ The brief leaves many rules open. My choices are in [section 2 of the design](do
 
 **Final quality.**
 
-- The race rule is proven over real HTTP: 10 parallel requests for one slot, with one technician and one bay, repeated 5 times. Exactly one 201, the others 409, never 500 ([`BookAppointmentConcurrencyApiTest`](src/test/java/com/keyloop/scheduler/adapter/in/web/BookAppointmentConcurrencyApiTest.java)).
+- The race rule is proven over real HTTP: 10 parallel requests for one slot, with 1, 3 or 10 technicians and bays, repeated 5 times. Exactly as many 201s as free slots, the others 409 with the real reason, never 500 ([`BookAppointmentConcurrencyApiTest`](src/test/java/com/keyloop/scheduler/adapter/in/web/BookAppointmentConcurrencyApiTest.java)).
 - All tests run on PostgreSQL 16 through Testcontainers. ArchUnit checks the layer rules, Spotless checks the format, and CI runs `./gradlew build` on every push. `scripts/compose-smoke.sh` checks the Docker stack end to end.
 - At the end I trimmed the suite: tests of framework and infrastructure details were removed, so the tests describe booking behaviour, not configuration.
 - I read each diff before merging it.
