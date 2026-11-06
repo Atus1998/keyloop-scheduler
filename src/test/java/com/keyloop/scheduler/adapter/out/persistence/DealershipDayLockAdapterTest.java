@@ -8,6 +8,7 @@ import com.keyloop.scheduler.PostgresIntegrationTest;
 import com.keyloop.scheduler.application.port.out.DealershipDayLockPort;
 import com.keyloop.scheduler.application.port.out.TransactionPort;
 import com.keyloop.scheduler.application.service.BookingQueueTimeoutException;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -81,6 +82,27 @@ class DealershipDayLockAdapterTest {
             });
 
     assertThat(after).isEqualTo("5s");
+  }
+
+  /** The function's own 2 s limit, not the connection's 5 s, ends the wait. */
+  @Test
+  void waitsAboutTwoSecondsBeforeTimingOut() throws Exception {
+    try (Holder holder = hold(DEALERSHIP, DAY)) {
+      long started = System.nanoTime();
+
+      assertThatThrownBy(() -> lockInTransaction(DEALERSHIP, DAY))
+          .isInstanceOf(BookingQueueTimeoutException.class);
+
+      assertThat(Duration.ofNanos(System.nanoTime() - started))
+          .isBetween(Duration.ofMillis(1500), Duration.ofMillis(4000));
+    }
+  }
+
+  @Test
+  void refusesToLockOutsideATransaction() {
+    assertThatThrownBy(() -> locks.lock(DEALERSHIP, DAY))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("open transaction");
   }
 
   private void lockInTransaction(long dealership, LocalDate day) {

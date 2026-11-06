@@ -117,7 +117,7 @@ public final class BookAppointmentService implements BookAppointmentUseCase {
     DealershipDay day = DealershipDay.containing(start, dealership.zoneId());
     // First statement of the transaction. Each later read (READ COMMITTED) then sees what the
     // previous booking of this dealership and day committed. A snapshot isolation level would not.
-    locks.lock(dealership.id(), start.atZone(dealership.zoneId()).toLocalDate());
+    locks.lock(dealership.id(), DealershipDay.dateOf(start, dealership.zoneId()));
     if (availability.isVehicleBusy(command.vehicleId(), start, end)) {
       return raceResolver.retryOrReject(slot(command, dealership, end), Reason.VEHICLE_BUSY);
     }

@@ -23,8 +23,15 @@ public record DealershipDay(Instant start, Instant end) {
   public static DealershipDay containing(Instant instant, ZoneId zone) {
     Objects.requireNonNull(instant, "instant");
     Objects.requireNonNull(zone, "zone");
-    LocalDate date = instant.atZone(zone).toLocalDate();
+    LocalDate date = dateOf(instant, zone);
     return new DealershipDay(
         date.atStartOfDay(zone).toInstant(), date.plusDays(1).atStartOfDay(zone).toInstant());
+  }
+
+  /** The local date of {@code instant} on the dealership calendar. */
+  public static LocalDate dateOf(Instant instant, ZoneId zone) {
+    Objects.requireNonNull(instant, "instant");
+    Objects.requireNonNull(zone, "zone");
+    return instant.atZone(zone).toLocalDate();
   }
 }

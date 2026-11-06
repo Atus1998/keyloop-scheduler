@@ -36,4 +36,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE scheduler_migrator IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO scheduler_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE scheduler_migrator IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO scheduler_app;
+
+-- Functions Flyway creates later (lock_booking_day): only the app may call them. The revoke
+-- from PUBLIC must be database-wide; a per-schema rule can only add rights.
+ALTER DEFAULT PRIVILEGES FOR ROLE scheduler_migrator
+  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE scheduler_migrator IN SCHEMA public
+  GRANT EXECUTE ON FUNCTIONS TO scheduler_app;
 SQL
